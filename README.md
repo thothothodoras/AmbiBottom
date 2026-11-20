@@ -2,6 +2,8 @@
 
 **A fourth side for Philips Ambilight TVs: an LED strip under the TV that follows the picture.**
 
+![AmbiBottom on a Philips 65OLED707: the TV's own Ambilight on the sides and top, the AmbiBottom strip lighting the wall below the TV](docs/images/ambibottom-tv.jpg)
+
 Philips Ambilight TVs light the wall on three sides (left, top, right). AmbiBottom
 adds the bottom. A small ESP32-S3 board running [WLED](https://kno.wled.ge) with the
 AmbiBottom usermod pretends to be a Philips Hue bridge; the TV's own
