@@ -1,0 +1,5 @@
+<!doctype html><html lang="el"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>AmbiBottom</title><style>body{margin:0;background:#0a0e17;color:#8998b3;font:14px sans-serif;padding:30px}</style></head><body>Φόρτωση…<script>
+(async()=>{try{const[h,pt]=await Promise.all([fetch('/ambi/en',{cache:'no-store'}).then(r=>r.text()),fetch('/ambi/el.json',{cache:'no-store'}).then(r=>r.json())]);
+const t=h.split(/([<>'"`])/);if(t.length!==pt.n)throw new Error('size');for(const[i,x]of pt.p)t[i]=x;
+document.open();document.write(t.join(''));document.close();}catch(e){location.replace('/ambi/en');}})();
+</script></body></html>

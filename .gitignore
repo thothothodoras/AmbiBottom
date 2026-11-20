@@ -1,0 +1,70 @@
+# ---- build output -----------------------------------------------------------
+/build/
+/build-*/
+.pio/
+*.o
+*.a
+/tools/sender
+__pycache__/
+*.pyc
+
+# ---- state, pairing, credentials, keys: NEVER in the repository ---------------
+# (they live in the state directory, e.g. /var/lib/ambi-bridge-cpp, or in the ESP's NVS)
+pairing.json
+pairing*.json
+groups.json
+groups.json.*
+identity.json
+identities/
+jointspace_credentials.json
+*credentials*.json
+login.json
+discovery.json
+settings.json
+strip_stats.json
+dtls_session.bin
+stream_resume.txt
+*.nvs
+*.lock
+*.log
+*.log.[0-9]*
+# keys and certificates (tools/key.pem + cert.pem are made by the tests when missing)
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+adbkey*
+.env
+.env.*
+
+# ---- the TV's own software: never in the repository ------------------------------
+# (APKs pulled from the TV, decompiled output, its libraries; they stay in ~/tv-re*)
+tv-re*/
+tv-re-apks*
+*.apk
+*.dex
+*.odex
+*.vdex
+*.smali
+*.jar
+jadx*/
+*-decompiled/
+
+# ---- measurements, captures, generated patterns -------------------------------------
+/results/
+*.mp4
+*.pcap
+*.pcapng
+
+# ---- local leftovers ---------------------------------------------------------------------
+*.bak
+*.bak[0-9]*
+*.bak/
+/.v031.bak/
+*.tmp
+*.swp
+*~
+.claude/
+.vscode/
+.idea/

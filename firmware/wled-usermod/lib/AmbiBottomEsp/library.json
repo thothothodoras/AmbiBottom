@@ -1,0 +1,12 @@
+{
+  "name": "AmbiBottomEsp",
+  "version": "0.32.0",
+  "description": "AmbiBottom usermod, the part that is not WLED: pairing store, DTLS-PSK stream server, glue to ambi_core. Portable C++ (also built and tested on Linux).",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "dependencies": [],
+  "build": {
+    "flags": ["-std=gnu++17"],
+    "unflags": ["-std=gnu++11"]
+  }
+}

@@ -1,0 +1,1894 @@
+#include "ambi_bottom_app.h"
+
+#if __has_include(<cjson/cJSON.h>)
+#include <cjson/cJSON.h>
+#else
+#include <cJSON.h>  // ESP-IDF "json" component
+#endif
+
+#include <algorithm>
+#include <atomic>
+#include <cctype>
+#include <chrono>
+#include <cmath>
+#include <cstdio>
+#include <deque>
+#include <thread>
+#include <map>
+#include <mutex>
+
+#include "ambi_dtls.h"
+#include "bridge_identity.hpp"
+#include "color_pipeline.hpp"
+#include "hue_core.hpp"
+#include "jointspace_fetch.hpp"
+#include "huestream.hpp"
+#include "settings.hpp"
+#include "ssdp_text.hpp"
+#include "stream_renderer.hpp"
+#include "strip_stats.hpp"
+#include "tv_lock.hpp"
+
+namespace ambi_bottom {
+
+namespace {
+
+double mono_s() {
+    return std::chrono::duration<double>(std::chrono::steady_clock::now().time_since_epoch()).count();
+}
+
+std::string to_hex(const uint8_t* data, size_t len) {
+    static const char* digits = "0123456789abcdef";
+    std::string out;
+    out.reserve(len * 2);
+    for (size_t i = 0; i < len; ++i) {
+        out.push_back(digits[data[i] >> 4]);
+        out.push_back(digits[data[i] & 15]);
+    }
+    return out;
+}
+
+std::vector<uint8_t> from_hex(const std::string& hex) {
+    auto val = [](char c) -> int {
+        if (c >= '0' && c <= '9') return c - '0';
+        if (c >= 'a' && c <= 'f') return c - 'a' + 10;
+        if (c >= 'A' && c <= 'F') return c - 'A' + 10;
+        return -1;
+    };
+    std::vector<uint8_t> out;
+    if (hex.size() % 2 != 0) return out;
+    for (size_t i = 0; i < hex.size(); i += 2) {
+        const int hi = val(hex[i]), lo = val(hex[i + 1]);
+        if (hi < 0 || lo < 0) return {};
+        out.push_back(static_cast<uint8_t>(hi * 16 + lo));
+    }
+    return out;
+}
+
+// ---- pairing store: users in one JSON text under the key "pairing" --------
+// {"users":{"<32 hex>":{"devicetype":"..","clientkey":"<32 hex or empty>"}}}
+// Same rules as the Linux bridge's pairing_store: pairing the same devicetype
+// again gives the same username back; a clientkey is made when it is asked
+// for and there is none yet.
+class Store : public hue_core::Pairing {
+public:
+    explicit Store(const Platform& platform) : platform_(platform) { load(); }
+
+    bool get(const std::string& username) override {
+        std::lock_guard<std::mutex> lk(mu_);
+        return users_.count(username) != 0;
+    }
+
+    std::pair<std::string, hue_core::PairedUser> pair(const std::string& devicetype, bool generate_clientkey) override {
+        std::lock_guard<std::mutex> lk(mu_);
+        std::string name;
+        for (const auto& [u, info] : users_)
+            if (info.devicetype == devicetype) name = u;
+        bool changed = false;
+        if (name.empty()) {
+            uint8_t raw[16];
+            platform_.random(raw, sizeof(raw));
+            name = to_hex(raw, sizeof(raw));
+            users_[name].devicetype = devicetype;
+            changed = true;
+        }
+        User& user = users_[name];
+        if (generate_clientkey && user.clientkey_hex.empty()) {
+            uint8_t raw[16];
+            platform_.random(raw, sizeof(raw));
+            user.clientkey_hex = to_hex(raw, sizeof(raw));
+            changed = true;
+        }
+        if (changed) save();
+        refused_at_ = -1.0;
+        return {name, hue_core::PairedUser{user.clientkey_hex}};
+    }
+
+    std::vector<std::pair<std::string, std::string>> users_with_devicetype() override {
+        std::lock_guard<std::mutex> lk(mu_);
+        std::vector<std::pair<std::string, std::string>> out;
+        for (const auto& [u, info] : users_) out.emplace_back(u, info.devicetype);
+        return out;
+    }
+
+    long link_remaining_ms() override {
+        std::lock_guard<std::mutex> lk(mu_);
+        const double left = link_until_ - mono_s();
+        return left > 0 ? static_cast<long>(left * 1000.0) : 0;
+    }
+
+    void note_pair_refused() override {
+        std::lock_guard<std::mutex> lk(mu_);
+        refused_at_ = mono_s();
+    }
+
+    void press(double window_s) {
+        std::lock_guard<std::mutex> lk(mu_);
+        link_until_ = mono_s() + window_s;
+    }
+
+    bool tv_wants_pair() {
+        std::lock_guard<std::mutex> lk(mu_);
+        return refused_at_ >= 0 && mono_s() - refused_at_ < 30.0;
+    }
+
+    std::vector<uint8_t> psk_for(const std::string& username) {
+        std::lock_guard<std::mutex> lk(mu_);
+        auto it = users_.find(username);
+        return it == users_.end() ? std::vector<uint8_t>() : from_hex(it->second.clientkey_hex);
+    }
+
+    int count() {
+        std::lock_guard<std::mutex> lk(mu_);
+        return static_cast<int>(users_.size());
+    }
+
+    void clear() {
+        std::lock_guard<std::mutex> lk(mu_);
+        users_.clear();
+        save();
+    }
+
+private:
+    struct User {
+        std::string devicetype, clientkey_hex;
+    };
+
+    void load() {
+        const std::string text = platform_.load ? platform_.load("pairing") : std::string();
+        cJSON* root = text.empty() ? nullptr : cJSON_Parse(text.c_str());
+        cJSON* users = root ? cJSON_GetObjectItemCaseSensitive(root, "users") : nullptr;
+        cJSON* u = nullptr;
+        cJSON_ArrayForEach(u, users) {
+            if (!u->string || !cJSON_IsObject(u)) continue;
+            cJSON* dt = cJSON_GetObjectItemCaseSensitive(u, "devicetype");
+            cJSON* ck = cJSON_GetObjectItemCaseSensitive(u, "clientkey");
+            User info;
+            if (cJSON_IsString(dt) && dt->valuestring) info.devicetype = dt->valuestring;
+            if (cJSON_IsString(ck) && ck->valuestring) info.clientkey_hex = ck->valuestring;
+            users_[u->string] = info;
+        }
+        if (root) cJSON_Delete(root);
+    }
+
+    void save() {
+        if (!platform_.save) return;
+        cJSON* root = cJSON_CreateObject();
+        cJSON* users = cJSON_CreateObject();
+        for (const auto& [u, info] : users_) {
+            cJSON* o = cJSON_CreateObject();
+            cJSON_AddStringToObject(o, "devicetype", info.devicetype.c_str());
+            cJSON_AddStringToObject(o, "clientkey", info.clientkey_hex.c_str());
+            cJSON_AddItemToObject(users, u.c_str(), o);
+        }
+        cJSON_AddItemToObject(root, "users", users);
+        char* text = cJSON_PrintUnformatted(root);
+        cJSON_Delete(root);
+        if (text) {
+            platform_.save("pairing", text);
+            cJSON_free(text);
+        }
+    }
+
+    const Platform& platform_;
+    std::mutex mu_;
+    std::map<std::string, User> users_;
+    double link_until_ = 0.0;
+    double refused_at_ = -1.0;
+};
+
+}  // namespace
+
+struct App::Impl {
+    Platform platform;
+    Config config;
+    bridge_identity::Identity identity;
+    Store store;
+    hue_core::Bridge* bridge = nullptr;
+
+    std::mutex http_mu;   // hue_core::Bridge is not thread safe
+    std::mutex state_mu;  // everything below
+    tv_lock::Tracker lock;
+    color_pipeline::StreamRenderer renderer;
+    color_pipeline::Settings strip;
+    bool stream_active = false;
+    bool in_session = false;
+    bool old_session = false;
+    double old_session_seen = 0.0;
+    std::string old_session_ip;
+    double old_session_since = -1.0;  // v0.37: start of this old-session episode (the nudge stops after 90 s)
+    unsigned long nudges = 0;          // 503s sent to make the TV reconnect
+    std::mutex log_mu;
+    struct LogLine {
+        double t, last;
+        std::string text;
+        unsigned n;
+    };
+    std::deque<LogLine> log;  // v0.37: /ambi/api/log
+    double t0 = mono_s();
+    void add_log(const std::string& text) {
+        std::lock_guard<std::mutex> lk(log_mu);
+        const double now = mono_s() - t0;
+        if (!log.empty() && log.back().text == text) {  // the same again: one line with a count
+            log.back().n++;
+            log.back().last = now;
+            return;
+        }
+        log.push_back(LogLine{now, now, text, 1});
+        while (log.size() > 60) log.pop_front();
+    }
+    bool new_leds = false;
+    bool release_pending = false;
+    std::deque<double> frame_times;
+
+    std::atomic<bool> stop{false};
+    std::atomic<bool> drop{false};
+
+    // v0.37: the page
+    std::vector<std::string> lamp_names;
+    std::vector<huestream::Channel> last_channels;  // the last good frame, as received
+    int last_colorspace = -1;
+    std::string last_version;
+    unsigned long bad_frames = 0;
+    std::atomic<bool> running{false};  // boots stopped: the strip belongs to WLED until Start
+    std::atomic<bool> js_paused{false};  // v0.42: a firmware update is running
+    std::atomic<bool> js_conn{false};    // v0.48: a JointSpace connection is open
+    std::atomic<bool> js_on{true};       // v0.48: the user can switch JointSpace off (saves ~45 KB while the TV streams)
+    // v0.45: JointSpace pairing (under js_mu)
+    int js_pair_cmd = 0;                // 1 = send pair/request, 2 = send pair/grant
+    std::string js_pair_state = "idle", js_pair_error, js_pair_ip, js_pair_pin;
+    jointspace::PairState js_pair;
+    double js_pair_time = -1.0, js_pair_deadline = -1.0;
+    // v0.44: diagnostics (under state_mu)
+    unsigned long hs_ok = 0, hs_fail = 0, js_fail = 0, js_lowmem = 0;  // v0.47: js_lowmem
+    int hs_fail_streak = 0, js_fail_streak = 0;
+    double hs_last_time = -1.0;
+    std::string hs_last_error;
+    // v0.44: Hue capture ring (under state_mu)
+    struct CapRow {
+        unsigned long seq = 0;
+        uint32_t t_ms = 0;
+        uint8_t cs = 0, n = 0;
+        uint16_t v[15] = {0};
+        uint8_t out[9] = {0};
+        uint16_t ma = 0;
+        uint8_t js[6] = {0};
+        bool js_ok = false;
+    };
+    static constexpr size_t kCapRing = 128;
+    std::vector<CapRow> cap;
+    bool cap_on = false;
+    unsigned long cap_seq = 0;
+    double cap_t0 = 0.0, cap_until = 0.0;
+    Night night_cfg;  // v0.44 (under state_mu)
+    bool night_now = false;
+    Demo demo;                         // under state_mu
+
+    // v0.37: JointSpace
+    std::mutex js_mu;                  // the three below (credentials, address)
+    std::string js_user, js_pass, js_ip;
+    bool js_loaded = false;
+    std::string tv_ip_seen;            // under state_mu: the TV's DTLS address
+    std::vector<jointspace::Zone> js_left, js_top, js_right;  // under state_mu: last good reply
+    double js_ok_time = -1.0;
+    std::string js_status = "not_configured", js_error;
+    std::deque<double> js_times;
+    color_pipeline::Corners corner_last;
+    double corner_weight = 0.0, corner_time = 0.0;
+    static constexpr double kJsMaxAgeS = 2.5;      // as the Linux monitor: older = not live
+    static constexpr double kCornerFadeMs = 1000.0;  // as the Linux bridge
+
+    void load_js() {
+        std::lock_guard<std::mutex> lk(js_mu);
+        if (js_loaded) return;
+        js_loaded = true;
+        if (!platform.load) return;
+        js_user = platform.load("js_user");
+        js_pass = platform.load("js_pass");
+        js_ip = platform.load("js_ip");
+        js_on = platform.load("js_on") != "0";  // v0.48
+    }
+
+    // The JointSpace corner colours for this frame, faded in / out over 1 s
+    // exactly as the Linux bridge does (main.cpp). Called with state_mu held.
+    const color_pipeline::Corners* corners_for(const color_pipeline::Settings& s, int lamp_count, double now,
+                                               color_pipeline::Corners& out) {
+        const bool want = color_pipeline::wants_side_colours(s, lamp_count);
+        bool live = false;
+        if (want && js_ok_time >= 0 && now - js_ok_time <= kJsMaxAgeS && js_status == "live" &&
+            (!js_left.empty() || !js_right.empty())) {
+            live = true;
+            corner_last.has_left = !js_left.empty();
+            corner_last.has_right = !js_right.empty();
+            if (corner_last.has_left) corner_last.left = color_pipeline::jointspace_to_led(js_left.front().r, js_left.front().g, js_left.front().b, s);
+            if (corner_last.has_right) corner_last.right = color_pipeline::jointspace_to_led(js_right.back().r, js_right.back().g, js_right.back().b, s);
+        }
+        const double step = corner_time > 0 ? (now - corner_time) * 1000.0 / kCornerFadeMs : 0.0;
+        corner_time = now;
+        if (!want) corner_weight = 0.0;
+        else if (live) corner_weight = std::min(1.0, corner_weight + step);
+        else corner_weight = std::max(0.0, corner_weight - step);
+        if (corner_weight <= 0.0) return nullptr;
+        out = corner_last;
+        out.weight = corner_weight;
+        return &out;
+    }
+
+    Impl(Platform p, Config c)
+        : platform(std::move(p)), config(std::move(c)),
+          identity(bridge_identity::make_identity(config.ip, config.http_port, config.mac, config.name)),
+          store(platform), lock(config.tv_dtls_limit_s) {
+        hue_core::Options o;
+        if (config.lamps == 5) {
+            o.lamp_names = {"Bottom-Left", "Bottom-CenterLeft", "Bottom-Middle", "Bottom-CenterRight", "Bottom-Right"};
+        }
+        o.tv_ip = config.tv_ip;
+        // v0.37: the TV streams from an old session -> fail its lamp check so it reconnects by itself
+        o.fail_lamp_check = [this](const std::string& src) {
+            std::lock_guard<std::mutex> lk(state_mu);
+            const double now = mono_s();
+            // old-session packets from this address within the last 3 s (the DTLS server reports every 2 s),
+            // for at most 90 s per episode (if the TV does not react, stop and leave the warning)
+            const bool active = old_session && src == old_session_ip && now - old_session_seen <= 3.0 &&
+                                old_session_since >= 0 && now - old_session_since <= 90.0;
+            if (active && (nudges++ % 4) == 0)
+                AMBI_LOG("[app] %s streams from an old session: lamp check answered 503 so the TV reconnects\n", src.c_str());
+            return active;
+        };
+        o.require_link_button = true;  // on the ESP pairing is ALWAYS by the button
+        o.load_groups_text = [this] { return platform.load ? platform.load("groups") : std::string(); };
+        o.save_groups_text = [this](const std::string& text) {
+            if (platform.save) platform.save("groups", text);
+        };
+        o.on_lightgroup_used = [this] {
+            std::lock_guard<std::mutex> lk(state_mu);
+            lock.lightgroup_used();
+        };
+        o.on_stream_active = [this](const std::string&, const std::string& group, bool active,
+                                    const std::vector<std::string>& lamp_ids) {
+            AMBI_LOG("[app] group %s stream.active=%s (%u lamps)\n", group.c_str(), active ? "true" : "false",
+                     static_cast<unsigned>(lamp_ids.size()));
+            std::lock_guard<std::mutex> lk(state_mu);
+            stream_active = active;
+            // The TV sends false, then true, then a NEW handshake and gives it
+            // tv_dtls_limit_s. On false: free the DTLS server at once.
+            if (active) {
+                lock.stream_requested(mono_s());
+            } else {
+                lock.stream_released();
+                drop = true;
+                renderer.skip_hold(mono_s(), strip);  // v0.42: ended on purpose - fade now, no 1 s hold
+            }
+        };
+        lamp_names = o.lamp_names;
+        bridge = new hue_core::Bridge(o, identity, store);
+        // v0.37: the strip settings saved from the page (NVS key "strip"); the
+        // usermod's own fields are applied on top by set_strip() right after.
+        const std::string saved = platform.load ? platform.load("strip") : std::string();
+        if (!saved.empty()) {
+            cJSON* obj = cJSON_Parse(saved.c_str());
+            if (cJSON_IsObject(obj)) settings::merge_json(strip, obj);
+            if (obj) cJSON_Delete(obj);
+        }
+        settings::sanitize(strip);
+        strip_stats::Storage io;
+        io.load = platform.stats_load;
+        io.save = platform.stats_save;
+        stats = new strip_stats::Stats(io);
+    }
+
+    // v0.37: the strip settings as text, for NVS ("" on failure).
+    static std::string settings_text(const color_pipeline::Settings& s) {
+        cJSON* o = settings::to_json(s);
+        char* t = o ? cJSON_PrintUnformatted(o) : nullptr;
+        if (o) cJSON_Delete(o);
+        std::string out = t ? t : "";
+        if (t) cJSON_free(t);
+        return out;
+    }
+    // Saves when the text differs from what is stored (NVS wears with writes).
+    void save_strip(const color_pipeline::Settings& s) {
+        if (!platform.save) return;
+        const std::string text = settings_text(s);
+        if (text.empty()) return;
+        const std::string old = platform.load ? platform.load("strip") : std::string();
+        if (old != text) platform.save("strip", text);
+    }
+
+    ~Impl() {
+        delete bridge;
+        delete stats;
+    }
+
+    // v0.44: one row of the Hue capture (under state_mu; last_channels = the frame just received)
+    void capture_row(double now) {
+        if (now > cap_until) {
+            cap_on = false;
+            std::vector<CapRow>().swap(cap);
+            add_log("Hue capture stopped (10 min)");
+            return;
+        }
+        if (cap.size() != kCapRing) cap.assign(kCapRing, CapRow());
+        CapRow r;
+        r.seq = ++cap_seq;
+        r.t_ms = static_cast<uint32_t>((now - cap_t0) * 1000.0);
+        r.cs = static_cast<uint8_t>(last_colorspace < 0 ? 0 : last_colorspace);
+        std::vector<huestream::Channel> ch = last_channels;
+        std::sort(ch.begin(), ch.end(), [](const huestream::Channel& x, const huestream::Channel& y) {
+            return std::atoi(x.lamp_id.c_str()) < std::atoi(y.lamp_id.c_str());
+        });
+        r.n = static_cast<uint8_t>(std::min<size_t>(ch.size(), 5));
+        for (size_t i = 0; i < r.n; ++i) {
+            r.v[i * 3] = ch[i].a;
+            r.v[i * 3 + 1] = ch[i].b;
+            r.v[i * 3 + 2] = ch[i].c;
+        }
+        const auto& leds = renderer.leds();
+        if (!leds.empty()) {
+            const color_pipeline::RGB8 pick[3] = {leds.front(), leds[leds.size() / 2], leds.back()};
+            for (int i = 0; i < 3; ++i) {
+                r.out[i * 3] = pick[i].r;
+                r.out[i * 3 + 1] = pick[i].g;
+                r.out[i * 3 + 2] = pick[i].b;
+            }
+        }
+        r.ma = static_cast<uint16_t>(std::min(65535.0, renderer.current_ma()));
+        if (!js_left.empty() && !js_right.empty() && js_ok_time >= 0 && now - js_ok_time < 2.5) {
+            r.js_ok = true;
+            const jointspace::Zone& L = js_left.front();
+            const jointspace::Zone& R = js_right.back();
+            const uint8_t js[6] = {L.r, L.g, L.b, R.r, R.g, R.b};
+            std::copy(js, js + 6, r.js);
+        }
+        cap[r.seq % kCapRing] = r;
+    }
+
+    // v0.41: the wear log
+    strip_stats::Stats* stats = nullptr;
+    double last_stats_frame = -1;
+    std::vector<double> wear_cache;
+    double wear_cache_time = -1e9;
+    double epoch() const { return platform.local_epoch_s ? platform.local_epoch_s() : 0.0; }
+
+    void on_frame(const uint8_t* data, size_t len) {
+        huestream::Frame frame;
+        if (!huestream::parse_frame(data, len, frame)) {
+            std::lock_guard<std::mutex> lk(state_mu);
+            ++bad_frames;
+            return;
+        }
+        const double now = mono_s();
+        std::lock_guard<std::mutex> lk(state_mu);
+        last_channels = frame.channels;
+        last_colorspace = frame.colorspace;
+        last_version = std::to_string(frame.major) + "." + std::to_string(frame.minor);
+        color_pipeline::Corners corners;
+        const color_pipeline::Corners* cp = corners_for(strip, static_cast<int>(frame.channels.size()), now, corners);
+        // v0.41: wear-aware limiter, from the mAh since the strip was mounted (refreshed once a minute)
+        const std::vector<double>* wear = nullptr;
+        if (strip.wear_strength > 0.0 && stats) {
+            if (now - wear_cache_time >= 60.0 || static_cast<int>(wear_cache.size()) != strip.led_count) {
+                wear_cache = color_pipeline::wear_from_mah(stats->install_mah(), strip.led_count);
+                wear_cache_time = now;
+            }
+            wear = &wear_cache;
+        }
+        // v0.44: night limit - the TV's colours at night_cfg.pct % between from_h and to_h (local)
+        const color_pipeline::Settings* sp = &strip;
+        color_pipeline::Settings night_s;
+        night_now = false;
+        if (night_cfg.on && platform.local_epoch_s) {
+            const double ep = platform.local_epoch_s();
+            if (ep > 1.6e9) {
+                const int h = static_cast<int>(std::fmod(ep / 3600.0, 24.0));
+                const int a = night_cfg.from_h, b = night_cfg.to_h;
+                night_now = a == b ? false : (a < b ? (h >= a && h < b) : (h >= a || h < b));
+            }
+        }
+        if (night_now) {
+            night_s = strip;
+            night_s.brightness = strip.brightness * night_cfg.pct / 100.0;
+            sp = &night_s;
+        }
+        if (renderer.on_frame(std::move(frame), *sp, now, cp, wear)) {
+            if (cap_on) capture_row(now);
+            new_leds = true;
+            // v0.43 (user 2026-11-19): the TV streams -> the Demo switches itself off, so it never
+            // plays after the TV goes to standby (the TV's USB port stays powered then)
+            if (demo.on) {
+                demo.on = false;
+                add_log("Demo off: the TV is streaming");
+            }
+            // v0.41: the wear log - only while the strip shows the TV (Start); stopped = WLED's effects
+            // are on the strip, not these frames. Saved from the usermod's loop, not from this task.
+            if (stats && running) {
+                const double dt = last_stats_frame < 0 ? 0.0 : now - last_stats_frame;
+                stats->add_frame(renderer.leds(), strip, renderer.info(), epoch(), dt, false);
+            }
+            last_stats_frame = now;
+        }
+        frame_times.push_back(now);
+        while (!frame_times.empty() && now - frame_times.front() > 2.0) frame_times.pop_front();
+    }
+};
+
+double max_budget_ma() { return color_pipeline::kMaxBudgetMa; }
+double strip_budget_ma(double budget_ma, double esp_ma) {
+    color_pipeline::Settings s;
+    s.current_budget_ma = budget_ma;
+    s.esp_same_port_ma = esp_ma;
+    return color_pipeline::effective_budget_ma(s);
+}
+
+App::App(Platform platform, Config config) : impl_(new Impl(std::move(platform), std::move(config))) {}
+
+App::~App() { delete impl_; }
+
+bool App::owns_path(const std::string& path) {
+    return path == "/description.xml" || path == "/api" || path.rfind("/api/", 0) == 0;
+}
+
+App::HttpResponse App::http(const std::string& method, const std::string& path, const std::string& body,
+                            const std::string& src_ip, const std::string& user_agent) {
+    hue_core::Response r;
+    {
+        std::lock_guard<std::mutex> lk(impl_->http_mu);
+        r = impl_->bridge->handle(method, path, body, src_ip, user_agent);
+    }
+    // v0.37 log: "/api/<32 hex>/x" -> "/api/<8 hex>.../x"; PUT/POST bodies only by size
+    std::string shown = path;
+    if (shown.rfind("/api/", 0) == 0 && shown.size() >= 37) {
+        bool hex = true;
+        for (size_t i = 5; i < 37 && hex; ++i) hex = std::isxdigit(static_cast<unsigned char>(shown[i])) != 0;
+        if (hex) shown = shown.substr(0, 13) + "..." + shown.substr(37);
+    }
+    std::string line = src_ip + " " + method + " " + shown + " -> " + std::to_string(r.status);
+    if (!body.empty()) {
+        // the TV's stream on/off is worth seeing; nothing else from a body is logged
+        if (body.find("\"active\":true") != std::string::npos || body.find("\"active\": true") != std::string::npos) line += " (stream.active=true)";
+        else if (body.find("\"active\":false") != std::string::npos || body.find("\"active\": false") != std::string::npos) line += " (stream.active=false)";
+        else line += " (" + std::to_string(body.size()) + " B)";
+    }
+    impl_->add_log(line);
+    return HttpResponse{r.status, r.content_type, r.body};
+}
+
+std::vector<std::string> App::ssdp_replies(const std::string& datagram) {
+    std::vector<std::string> out;
+    const std::string st = ssdp_text::search_target(datagram);
+    if (st.empty()) return out;
+    for (int v : ssdp_text::answers(st, impl_->identity)) out.push_back(ssdp_text::search_reply(impl_->identity, v));
+    return out;
+}
+
+std::vector<std::string> App::ssdp_notifies() {
+    std::vector<std::string> out;
+    for (int v = 0; v < 3; ++v) out.push_back(ssdp_text::notify(impl_->identity, v));
+    return out;
+}
+
+void App::press_link_button() {
+    AMBI_LOG("[app] link button: pairing open for %.0f s\n", impl_->config.link_window_s);
+    impl_->store.press(impl_->config.link_window_s);
+}
+
+void App::forget_pairing() {
+    AMBI_LOG("[app] every paired user removed\n");
+    impl_->store.clear();
+}
+
+void App::run_dtls() {
+    ambi_dtls::Options o;
+    o.port = impl_->config.stream_port;
+    o.idle_timeout_s = impl_->config.dtls_idle_timeout_s;
+    o.stop = &impl_->stop;
+    o.drop_session = &impl_->drop;
+    Impl* impl = impl_;
+    o.on_handshake = [impl](bool ok, const std::string& ip, const std::string& detail) {
+        std::lock_guard<std::mutex> lk(impl->state_mu);
+        if (ok) impl->tv_ip_seen = ip;  // v0.37: JointSpace asks the same TV
+        // v0.44: diagnostics
+        if (ok) {
+            impl->hs_ok++;
+            impl->hs_fail_streak = 0;
+        } else {
+            impl->hs_fail++;
+            impl->hs_fail_streak++;
+            impl->hs_last_error = detail;
+        }
+        impl->hs_last_time = mono_s();
+        impl->add_log("DTLS handshake from " + ip + (ok ? " OK" : " FAILED: " + detail));
+        const double latency = impl->lock.handshake(ok, detail, mono_s());
+        if (ok && latency >= 0) {
+            AMBI_LOG("[app] DTLS handshake %.2f s after stream.active=true (the TV allows %.0f s)\n", latency,
+                     impl->lock.limit_s());
+        } else if (!ok) {
+            AMBI_LOG("[app] DTLS handshake from %s FAILED (%s)\n", ip.c_str(), detail.c_str());
+        }
+    };
+    o.on_old_session = [impl](const std::string& ip, uint64_t, bool active) {
+        std::lock_guard<std::mutex> lk(impl->state_mu);
+        const double now = mono_s();
+        if (active && (!impl->old_session || ip != impl->old_session_ip || now - impl->old_session_seen > 10.0))
+            impl->old_session_since = now;  // a new episode
+        if (!active) impl->old_session_since = -1.0;
+        if (active != impl->old_session || ip != impl->old_session_ip)
+            impl->add_log(active ? "OLD DTLS session from " + ip + " (we restarted while it streamed)" : "old session from " + ip + " ended");
+        impl->old_session = active;
+        impl->old_session_ip = ip;
+        impl->old_session_seen = now;
+    };
+    o.on_session = [impl](bool in_session) {
+        std::lock_guard<std::mutex> lk(impl->state_mu);
+        impl->in_session = in_session;
+    };
+    ambi_dtls::run_server(
+        o, [impl](const std::string& username) { return impl->store.psk_for(username); },
+        [impl](const uint8_t* data, size_t len) { impl->on_frame(data, len); });
+}
+
+void App::stop() { impl_->stop = true; }
+
+void App::set_strip(const StripConfig& c) {
+    // v0.37: on top of the settings in force (the page may have set the ones
+    // the usermod does not expose); before, the rest went back to the defaults.
+    color_pipeline::Settings s;
+    {
+        std::lock_guard<std::mutex> lk(impl_->state_mu);
+        s = impl_->strip;
+    }
+    s.led_count = c.led_count;
+    s.ma_per_led_full_white = c.ma_per_led;
+    s.current_budget_ma = c.budget_ma;
+    s.esp_same_port_ma = c.esp_ma;  // v0.49
+    s.ma_scale_r = c.ma_scale_r;
+    s.ma_scale_g = c.ma_scale_g;
+    s.ma_scale_b = c.ma_scale_b;
+    s.brightness = c.brightness;
+    s.rise_ms = c.rise_ms;
+    s.peak_emphasis = c.peak_emphasis;
+    s.strip_layout = color_pipeline::strip_layout_from(c.layout, color_pipeline::kLayoutTv);
+    s.lamp_positions = c.lamp_positions;
+    settings::sanitize(s);  // the same limits as the Linux bridge's settings
+    {
+        std::lock_guard<std::mutex> lk(impl_->state_mu);
+        impl_->strip = s;
+    }
+    impl_->save_strip(s);
+}
+
+constexpr double kDemoBlackS = 2.0;  // v0.41: black after a stream ends, while the Demo is on
+
+bool App::poll_leds(double, std::vector<Rgb>& leds, bool* release) {
+    if (release) *release = false;
+    const double now = mono_s();
+    std::lock_guard<std::mutex> lk(impl_->state_mu);
+    if (impl_->lock.check_deadline(now, impl_->renderer.last_frame_time())) {
+        AMBI_LOG("[app] no DTLS handshake within %.0f s of stream.active=true: the TV has locked itself to "
+                 "LightGroup (no stream) - it needs a TV RESTART to try again\n", impl_->lock.limit_s());
+    }
+    const bool was_driving = impl_->renderer.driving();
+    bool show = impl_->new_leds;
+    impl_->new_leds = false;
+    // v0.41 (queue 2026-11-18 (5)): with the Demo on, the strip goes back to the demo 2 s after the
+    // fade instead of after loss_black_s (30 s of black that only make sense with the demo off)
+    bool ticked;
+    if (impl_->demo.on && impl_->strip.loss_black_s > kDemoBlackS) {
+        color_pipeline::Settings s = impl_->strip;
+        s.loss_black_s = kDemoBlackS;
+        ticked = impl_->renderer.tick(s, now);
+    } else {
+        ticked = impl_->renderer.tick(impl_->strip, now);
+    }
+    if (ticked) show = true;
+    if (was_driving && !impl_->renderer.driving()) {
+        if (release) *release = true;
+        return false;
+    }
+    if (!show || !impl_->renderer.driving()) return false;
+    const auto& src = impl_->renderer.leds();
+    leds.resize(src.size());
+    for (size_t i = 0; i < src.size(); ++i) leds[i] = Rgb{src[i].r, src[i].g, src[i].b};
+    return true;
+}
+
+Status App::status(double) {
+    const double now = mono_s();
+    Status s;
+    s.paired_users = impl_->store.count();
+    s.link_remaining_ms = impl_->store.link_remaining_ms();
+    s.tv_wants_pair = impl_->store.tv_wants_pair();
+    std::lock_guard<std::mutex> lk(impl_->state_mu);
+    s.stream_active = impl_->stream_active;
+    s.in_session = impl_->in_session;
+    const double last = impl_->renderer.last_frame_time();
+    s.live = last >= 0 && now - last < 1.5;
+    while (!impl_->frame_times.empty() && now - impl_->frame_times.front() > 2.0) impl_->frame_times.pop_front();
+    s.fps = impl_->frame_times.size() / 2.0;
+    s.frames = impl_->renderer.frames();
+    s.lamps_in_stream = impl_->renderer.lamp_count();
+    s.phase = impl_->renderer.phase();
+    s.current_ma = impl_->renderer.current_ma();
+    const tv_lock::Status ls = impl_->lock.status(now);
+    s.tv_locked = ls.locked && !s.live;
+    s.tv_lock_reason = ls.reason;
+    s.tv_lock_detail = ls.detail;
+    s.tv_lock_age_s = ls.age_s;
+    s.tv_lock_confirmed = ls.confirmed;
+    s.handshake_latency_s = ls.last_handshake_latency_s;
+    s.old_session = impl_->old_session && now - impl_->old_session_seen <= 6.0 && !s.live;
+    return s;
+}
+
+Indicator App::indicator(double now_s) {
+    const Status s = status(now_s);
+    if (s.tv_locked) return Indicator::tv_locked;
+    if (s.old_session) return Indicator::old_session;
+    if (s.link_remaining_ms > 0) return Indicator::pairing_open;
+    if (s.tv_wants_pair) return Indicator::tv_wants_pair;
+    if (s.live) return Indicator::streaming;
+    if (s.paired_users == 0) return Indicator::not_paired;
+    return Indicator::idle;
+}
+
+std::string App::bridge_id() { return impl_->identity.bridgeid; }
+
+std::string App::status_json(double now_s) {
+    const Status s = status(now_s);
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "bridge_ip", impl_->identity.ip.c_str());
+    cJSON_AddStringToObject(o, "bridge_mac", impl_->identity.mac.c_str());
+    cJSON_AddStringToObject(o, "bridgeid", impl_->identity.bridgeid.c_str());
+    cJSON_AddNumberToObject(o, "paired_users", s.paired_users);
+    cJSON_AddNumberToObject(o, "link_remaining_ms", static_cast<double>(s.link_remaining_ms));
+    cJSON_AddBoolToObject(o, "tv_wants_pair", s.tv_wants_pair);
+    cJSON_AddBoolToObject(o, "stream_active", s.stream_active);
+    cJSON_AddBoolToObject(o, "in_session", s.in_session);
+    cJSON_AddBoolToObject(o, "live", s.live);
+    cJSON_AddNumberToObject(o, "fps", s.fps);
+    cJSON_AddNumberToObject(o, "frames", static_cast<double>(s.frames));
+    cJSON_AddNumberToObject(o, "lamps_in_stream", s.lamps_in_stream);
+    cJSON_AddStringToObject(o, "phase", s.phase.c_str());
+    cJSON_AddNumberToObject(o, "current_ma", s.current_ma);
+    if (s.tv_locked) {
+        cJSON* l = cJSON_CreateObject();
+        cJSON_AddStringToObject(l, "reason", s.tv_lock_reason.c_str());
+        cJSON_AddStringToObject(l, "detail", s.tv_lock_detail.c_str());
+        cJSON_AddNumberToObject(l, "age_s", s.tv_lock_age_s);
+        cJSON_AddBoolToObject(l, "confirmed", s.tv_lock_confirmed);
+        cJSON_AddItemToObject(o, "tv_dtls_lock", l);
+    } else {
+        cJSON_AddNullToObject(o, "tv_dtls_lock");
+    }
+    if (s.handshake_latency_s < 0) cJSON_AddNullToObject(o, "handshake_latency_s");
+    else cJSON_AddNumberToObject(o, "handshake_latency_s", s.handshake_latency_s);
+    cJSON_AddBoolToObject(o, "old_session", s.old_session);
+    char* text = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    std::string out = text ? text : "{}";
+    if (text) cJSON_free(text);
+    return out;
+}
+
+
+// ---- v0.37: the page -----------------------------------------------------------
+
+void App::set_running(bool running) {
+    if (running && !impl_->running) {  // v0.42: Start - the TV's colours come in softly (fade_in_ms)
+        std::lock_guard<std::mutex> lk(impl_->state_mu);
+        impl_->renderer.restart_from_black();
+    }
+    if (impl_->running.exchange(running) != running)
+        AMBI_LOG("[app] %s from the page\n", running ? "START: the strip is ours" : "STOP: the strip is WLED's again");
+}
+
+bool App::running() { return impl_->running; }
+
+namespace {
+std::string print_and_delete(cJSON* o);  // below
+}  // namespace
+
+std::string App::diag_json() {
+    const double now = mono_s();
+    cJSON* o = cJSON_CreateObject();
+    {
+        std::lock_guard<std::mutex> lk(impl_->state_mu);
+        Impl& m = *impl_;
+        cJSON_AddNumberToObject(o, "hs_ok", static_cast<double>(m.hs_ok));
+        cJSON_AddNumberToObject(o, "hs_fail", static_cast<double>(m.hs_fail));
+        cJSON_AddNumberToObject(o, "hs_fail_streak", m.hs_fail_streak);
+        cJSON_AddNumberToObject(o, "hs_last_age_s", m.hs_last_time < 0 ? -1.0 : std::round((now - m.hs_last_time) * 10) / 10);
+        cJSON_AddStringToObject(o, "hs_last_error", m.hs_last_error.c_str());
+        const double last = m.renderer.last_frame_time();
+        cJSON_AddNumberToObject(o, "frame_age_s", last < 0 ? -1.0 : std::round((now - last) * 100) / 100);
+        cJSON_AddNumberToObject(o, "frames", static_cast<double>(m.renderer.frames()));
+        double fps = 0.0;
+        if (m.frame_times.size() >= 2) {
+            const double span = m.frame_times.back() - m.frame_times.front();
+            if (span > 0 && now - m.frame_times.back() < 1.0) fps = (m.frame_times.size() - 1) / span;
+        }
+        cJSON_AddNumberToObject(o, "fps", std::round(fps * 10) / 10);
+        cJSON_AddNumberToObject(o, "bad_frames", static_cast<double>(m.bad_frames));
+        cJSON_AddBoolToObject(o, "stream_active", m.stream_active);
+        cJSON_AddBoolToObject(o, "old_session", m.old_session);
+        cJSON_AddBoolToObject(o, "tv_locked", m.lock.status(now).locked && !(last >= 0 && now - last < 1.0));
+        cJSON_AddStringToObject(o, "js_status", m.js_status.c_str());
+        cJSON_AddStringToObject(o, "js_error", m.js_error.c_str());
+        cJSON_AddNumberToObject(o, "js_ok_age_s", m.js_ok_time < 0 ? -1.0 : std::round((now - m.js_ok_time) * 10) / 10);
+        cJSON_AddNumberToObject(o, "js_fail", static_cast<double>(m.js_fail));
+        cJSON_AddNumberToObject(o, "js_lowmem", static_cast<double>(m.js_lowmem));
+        cJSON_AddNumberToObject(o, "js_fail_streak", m.js_fail_streak);
+        cJSON_AddBoolToObject(o, "demo_on", m.demo.on);
+        cJSON_AddBoolToObject(o, "night_now", m.night_now);
+        cJSON_AddBoolToObject(o, "capture_on", m.cap_on);
+    }
+    cJSON_AddNumberToObject(o, "paired", impl_->store.count());
+    cJSON_AddBoolToObject(o, "running", impl_->running.load());
+    {
+        std::lock_guard<std::mutex> lk(impl_->js_mu);
+        cJSON_AddBoolToObject(o, "js_configured", !impl_->js_user.empty() && !impl_->js_pass.empty());
+    }
+    return print_and_delete(o);
+}
+
+void App::capture(bool on) {
+    std::lock_guard<std::mutex> lk(impl_->state_mu);
+    if (on == impl_->cap_on) return;
+    impl_->cap_on = on;
+    if (on) {
+        impl_->cap_t0 = mono_s();
+        impl_->cap_until = impl_->cap_t0 + 600.0;
+        impl_->cap.assign(Impl::kCapRing, Impl::CapRow());
+        impl_->add_log("Hue capture started (raw frames, max 10 min)");
+    } else {
+        std::vector<Impl::CapRow>().swap(impl_->cap);
+        impl_->add_log("Hue capture stopped");
+    }
+}
+
+std::string App::capture_json(unsigned long from) {
+    std::string out;
+    out.reserve(4096);
+    std::lock_guard<std::mutex> lk(impl_->state_mu);
+    const unsigned long last = impl_->cap_seq;
+    const unsigned long first = last >= Impl::kCapRing ? last - Impl::kCapRing + 1 : 1;
+    const unsigned long start = std::max(from + 1, first);
+    out += "{\"on\":";
+    out += impl_->cap_on ? "true" : "false";
+    out += ",\"next\":" + std::to_string(last);
+    out += ",\"lost\":" + std::to_string(from + 1 < first && from > 0 ? first - from - 1 : 0);
+    out += ",\"rows\":[";
+    bool firstRow = true;
+    if (!impl_->cap.empty()) {
+        for (unsigned long s = start; s <= last; ++s) {
+            const Impl::CapRow& r = impl_->cap[s % Impl::kCapRing];
+            if (r.seq != s) continue;
+            if (!firstRow) out += ',';
+            firstRow = false;
+            out += '[' + std::to_string(r.seq) + ',' + std::to_string(r.t_ms) + ',' + std::to_string(r.cs) + ',' + std::to_string(r.n);
+            for (int i = 0; i < 15; ++i) out += ',' + std::to_string(r.v[i]);
+            for (int i = 0; i < 9; ++i) out += ',' + std::to_string(r.out[i]);
+            out += ',' + std::to_string(r.ma);
+            for (int i = 0; i < 6; ++i) out += ',' + (r.js_ok ? std::to_string(r.js[i]) : std::string("-1"));
+            out += ']';
+        }
+    }
+    out += "]}";
+    return out;
+}
+
+void App::set_night(const Night& n) {
+    Night v = n;
+    v.from_h = std::max(0, std::min(23, v.from_h));
+    v.to_h = std::max(0, std::min(23, v.to_h));
+    v.pct = std::max(5, std::min(100, v.pct));
+    std::lock_guard<std::mutex> lk(impl_->state_mu);
+    impl_->night_cfg = v;
+}
+
+Night App::night() {
+    std::lock_guard<std::mutex> lk(impl_->state_mu);
+    return impl_->night_cfg;
+}
+
+std::string App::tv_ip_seen() {
+    std::lock_guard<std::mutex> lk(impl_->state_mu);
+    return impl_->tv_ip_seen;
+}
+
+void App::pause_jointspace(bool paused) {
+    if (impl_->js_paused.exchange(paused) != paused)
+        note(paused ? "firmware update: JointSpace paused (frees ~45 KB)" : "JointSpace resumed");
+}
+
+void App::set_demo(const Demo& d) {
+    Demo v = d;
+    if (v.bri_pct < 1) v.bri_pct = 1;
+    if (v.bri_pct > 100) v.bri_pct = 100;
+    if (v.speed < 0) v.speed = 0;
+    if (v.speed > 255) v.speed = 255;
+    if (v.fx < -1 || v.fx > 255) v.fx = -1;
+    std::lock_guard<std::mutex> lk(impl_->state_mu);
+    impl_->demo = v;
+}
+
+Demo App::demo() {
+    std::lock_guard<std::mutex> lk(impl_->state_mu);
+    return impl_->demo;
+}
+
+bool App::post_demo(const std::string& body) {
+    cJSON* o = cJSON_Parse(body.c_str());
+    if (!cJSON_IsObject(o)) {
+        if (o) cJSON_Delete(o);
+        return false;
+    }
+    Demo d = demo();
+    cJSON* v = cJSON_GetObjectItemCaseSensitive(o, "on");
+    if (cJSON_IsBool(v)) d.on = cJSON_IsTrue(v);
+    v = cJSON_GetObjectItemCaseSensitive(o, "fx");
+    if (cJSON_IsNumber(v)) d.fx = static_cast<int>(v->valuedouble);
+    v = cJSON_GetObjectItemCaseSensitive(o, "bri_pct");
+    if (cJSON_IsNumber(v)) d.bri_pct = static_cast<int>(v->valuedouble);
+    v = cJSON_GetObjectItemCaseSensitive(o, "speed");
+    if (cJSON_IsNumber(v)) d.speed = static_cast<int>(v->valuedouble);
+    cJSON_Delete(o);
+    set_demo(d);
+    return true;
+}
+
+std::string App::demo_json() {
+    const Demo d = demo();
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "on", d.on);
+    cJSON_AddNumberToObject(o, "fx", d.fx);
+    cJSON_AddNumberToObject(o, "bri_pct", d.bri_pct);
+    cJSON_AddNumberToObject(o, "speed", d.speed);
+    cJSON_AddBoolToObject(o, "running", impl_->running.load());
+    char* text = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    std::string out = text ? text : "{}";
+    if (text) cJSON_free(text);
+    return out;
+}
+
+namespace {
+std::string print_and_delete(cJSON* o) {
+    char* text = cJSON_PrintUnformatted(o);
+    cJSON_Delete(o);
+    std::string out = text ? text : "{}";
+    if (text) cJSON_free(text);
+    return out;
+}
+cJSON* rgb_array(uint8_t r, uint8_t g, uint8_t b) {
+    cJSON* a = cJSON_CreateArray();
+    cJSON_AddItemToArray(a, cJSON_CreateNumber(r));
+    cJSON_AddItemToArray(a, cJSON_CreateNumber(g));
+    cJSON_AddItemToArray(a, cJSON_CreateNumber(b));
+    return a;
+}
+}  // namespace
+
+std::string App::strip_settings_json(bool can_edit, int wled_led_count) {
+    color_pipeline::Settings s;
+    {
+        std::lock_guard<std::mutex> lk(impl_->state_mu);
+        s = impl_->strip;
+    }
+    if (wled_led_count > 0 && s.led_count > wled_led_count) s.led_count = wled_led_count;
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "available", true);
+    cJSON_AddBoolToObject(o, "can_edit", can_edit);
+    cJSON_AddItemToObject(o, "settings", settings::to_json(s));
+    cJSON_AddItemToObject(o, "defaults", settings::to_json(color_pipeline::Settings{}));
+    cJSON* limits = cJSON_CreateObject();
+    cJSON_AddNumberToObject(limits, "current_budget_ma_max", color_pipeline::kMaxBudgetMa);
+    // v0.37: led_count = the LEDs USED (the rest are kept dark); at most WLED's Length (all LEDs on the strip)
+    if (wled_led_count > 0) cJSON_AddNumberToObject(limits, "led_count_max", wled_led_count);
+    cJSON_AddItemToObject(o, "limits", limits);
+    return print_and_delete(o);
+}
+
+int App::post_strip_settings(const std::string& body, int wled_led_count, std::string* reply, StripConfig* applied) {
+    cJSON* in = body.empty() ? nullptr : cJSON_Parse(body.c_str());
+    if (!cJSON_IsObject(in)) {
+        if (in) cJSON_Delete(in);
+        if (reply) *reply = "{\"error\":\"invalid_json\"}";
+        return 400;
+    }
+    color_pipeline::Settings s;
+    {
+        std::lock_guard<std::mutex> lk(impl_->state_mu);
+        s = impl_->strip;
+    }
+    settings::merge_json(s, in);  // partial, clamped: the Linux page's older route
+    cJSON_Delete(in);
+    if (wled_led_count > 0 && s.led_count > wled_led_count) s.led_count = wled_led_count;  // at most WLED's Length
+    settings::sanitize(s);
+    {
+        std::lock_guard<std::mutex> lk(impl_->state_mu);
+        impl_->strip = s;
+    }
+    impl_->save_strip(s);
+    AMBI_LOG("[app] strip settings from the page: leds=%d budget=%.0f mA mA/LED=%.1f pe=%.2f rise=%.0f ms\n",
+             s.led_count, s.current_budget_ma, s.ma_per_led_full_white, s.peak_emphasis, s.rise_ms);
+    if (applied) {
+        StripConfig c;
+        c.led_count = s.led_count;
+        c.ma_per_led = s.ma_per_led_full_white;
+        c.budget_ma = s.current_budget_ma;
+        c.esp_ma = s.esp_same_port_ma;  // v0.49: kept (set from the device settings)
+        c.ma_scale_r = s.ma_scale_r;
+        c.ma_scale_g = s.ma_scale_g;
+        c.ma_scale_b = s.ma_scale_b;
+        c.brightness = s.brightness;
+        c.rise_ms = s.rise_ms;
+        c.peak_emphasis = s.peak_emphasis;
+        c.layout = color_pipeline::strip_layout_name(s.strip_layout);
+        c.lamp_positions = s.lamp_positions;
+        *applied = c;
+    }
+    if (reply) {
+        std::string r = strip_settings_json(true, wled_led_count);
+        // + "saved_to_disk": true (the page's message); NVS write errors are not reported back
+        if (!r.empty() && r.back() == '}') r.insert(r.size() - 1, ",\"saved_to_disk\":true");
+        *reply = r;
+    }
+    return 200;
+}
+
+namespace {
+const char* const kWbSlotKeys[3] = {"wb_slot1", "wb_slot2", "wb_slot3"};
+
+// 1-24 characters (UTF-8 code points), no control characters, none of < > & " ' backslash
+bool wb_slot_name_ok(const std::string& n) {
+    int chars = 0;
+    for (unsigned char c : n) {
+        if (c < 0x20 || c == 0x7f || c == '<' || c == '>' || c == '&' || c == '"' || c == '\'' || c == '\\') return false;
+        if ((c & 0xC0) != 0x80) ++chars;
+    }
+    return chars >= 1 && chars <= 24;
+}
+
+cJSON* wb_slot_read(const Platform& p, int i) {  // the stored object, or nullptr
+    if (!p.load) return nullptr;
+    const std::string t = p.load(kWbSlotKeys[i]);
+    if (t.empty()) return nullptr;
+    cJSON* s = cJSON_Parse(t.c_str());
+    cJSON* wb = cJSON_IsObject(s) ? cJSON_GetObjectItemCaseSensitive(s, "wb") : nullptr;
+    if (!cJSON_IsArray(wb) || cJSON_GetArraySize(wb) != 3 || !cJSON_IsNumber(cJSON_GetArrayItem(wb, 0)) ||
+        !cJSON_IsNumber(cJSON_GetArrayItem(wb, 1)) || !cJSON_IsNumber(cJSON_GetArrayItem(wb, 2))) {
+        if (s) cJSON_Delete(s);
+        return nullptr;
+    }
+    return s;
+}
+}  // namespace
+
+std::string App::wb_slots_json(bool can_edit) {
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "can_edit", can_edit);
+    cJSON* arr = cJSON_AddArrayToObject(o, "slots");
+    for (int i = 0; i < 3; ++i) {
+        cJSON* s = wb_slot_read(impl_->platform, i);
+        cJSON* out = cJSON_CreateObject();
+        cJSON_AddNumberToObject(out, "n", i + 1);
+        if (!s) {
+            cJSON_AddBoolToObject(out, "empty", true);
+        } else {
+            cJSON* nm = cJSON_GetObjectItemCaseSensitive(s, "name");
+            cJSON_AddStringToObject(out, "name", cJSON_IsString(nm) ? nm->valuestring : "");
+            cJSON_AddItemToObject(out, "wb", cJSON_Duplicate(cJSON_GetObjectItemCaseSensitive(s, "wb"), 1));
+            cJSON_AddBoolToObject(out, "keep_pure", !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(s, "keep_pure")));
+            cJSON_Delete(s);
+        }
+        cJSON_AddItemToArray(arr, out);
+    }
+    return print_and_delete(o);
+}
+
+int App::post_wb_slot(const std::string& body, int wled_led_count, std::string* reply, StripConfig* applied,
+                      bool* strip_changed) {
+    if (strip_changed) *strip_changed = false;
+    auto fail = [&](int code, const char* err) {
+        if (reply) *reply = std::string("{\"error\":\"") + err + "\"}";
+        return code;
+    };
+    cJSON* in = body.empty() ? nullptr : cJSON_Parse(body.c_str());
+    if (!cJSON_IsObject(in)) {
+        if (in) cJSON_Delete(in);
+        return fail(400, "invalid_json");
+    }
+    cJSON* jn = cJSON_GetObjectItemCaseSensitive(in, "slot");
+    cJSON* ja = cJSON_GetObjectItemCaseSensitive(in, "action");
+    cJSON* jm = cJSON_GetObjectItemCaseSensitive(in, "name");
+    const int n = cJSON_IsNumber(jn) ? jn->valueint : 0;
+    const std::string act = cJSON_IsString(ja) ? ja->valuestring : "";
+    std::string name = cJSON_IsString(jm) ? jm->valuestring : "";
+    cJSON_Delete(in);
+    if (n < 1 || n > 3) return fail(422, "slot_1_3");
+    if (!impl_->platform.load || !impl_->platform.save) return fail(503, "no_storage");
+    const char* key = kWbSlotKeys[n - 1];
+    if (act == "save") {
+        if (name.empty()) {
+            if (cJSON* old = wb_slot_read(impl_->platform, n - 1)) {
+                cJSON* nm = cJSON_GetObjectItemCaseSensitive(old, "name");
+                if (cJSON_IsString(nm)) name = nm->valuestring;
+                cJSON_Delete(old);
+            }
+            if (name.empty()) name = "Slot " + std::to_string(n);
+        }
+        if (!wb_slot_name_ok(name)) return fail(422, "name_1_24_plain");
+        color_pipeline::Settings s;
+        {
+            std::lock_guard<std::mutex> lk(impl_->state_mu);
+            s = impl_->strip;
+        }
+        cJSON* o = cJSON_CreateObject();
+        cJSON_AddStringToObject(o, "name", name.c_str());
+        const double wb[3] = {s.wb_r, s.wb_g, s.wb_b};
+        cJSON_AddItemToObject(o, "wb", cJSON_CreateDoubleArray(wb, 3));
+        cJSON_AddBoolToObject(o, "keep_pure", s.wb_keep_pure);
+        char* t = cJSON_PrintUnformatted(o);
+        cJSON_Delete(o);
+        const bool ok = t && impl_->platform.save(key, t);
+        if (t) cJSON_free(t);
+        if (!ok) return fail(500, "save_failed");
+        AMBI_LOG("[app] white balance -> slot %d\n", n);
+    } else if (act == "load") {
+        cJSON* s = wb_slot_read(impl_->platform, n - 1);
+        if (!s) return fail(422, "slot_empty");
+        cJSON* wb = cJSON_GetObjectItemCaseSensitive(s, "wb");
+        cJSON* b = cJSON_CreateObject();
+        cJSON_AddNumberToObject(b, "wb_r", cJSON_GetArrayItem(wb, 0)->valuedouble);
+        cJSON_AddNumberToObject(b, "wb_g", cJSON_GetArrayItem(wb, 1)->valuedouble);
+        cJSON_AddNumberToObject(b, "wb_b", cJSON_GetArrayItem(wb, 2)->valuedouble);
+        cJSON_AddBoolToObject(b, "wb_keep_pure", !cJSON_IsFalse(cJSON_GetObjectItemCaseSensitive(s, "keep_pure")));
+        cJSON_Delete(s);
+        const std::string sb = print_and_delete(b);
+        std::string r;
+        const int code = post_strip_settings(sb, wled_led_count, &r, applied);  // clamped as any page change
+        if (code != 200) {
+            if (reply) *reply = r;
+            return code;
+        }
+        if (strip_changed) *strip_changed = true;
+        AMBI_LOG("[app] white balance <- slot %d\n", n);
+    } else if (act == "clear") {
+        if (!impl_->platform.save(key, "")) return fail(500, "save_failed");
+    } else {
+        return fail(422, "action_save_load_clear");
+    }
+    if (reply) *reply = wb_slots_json(true);
+    return 200;
+}
+
+std::string App::page_state_json(const PageInfo& info) {
+    const Status st = status(0.0);
+    const double now = mono_s();
+    color_pipeline::Settings s;
+    std::vector<huestream::Channel> channels;
+    int colorspace;
+    std::string version;
+    unsigned long bad;
+    std::vector<color_pipeline::RGB8> leds;
+    color_pipeline::RenderInfo ri;
+    std::string phase;
+    double ma, last_frame;
+    bool driving;
+    {
+        std::lock_guard<std::mutex> lk(impl_->state_mu);
+        s = impl_->strip;
+        channels = impl_->last_channels;
+        colorspace = impl_->last_colorspace;
+        version = impl_->last_version;
+        bad = impl_->bad_frames;
+        leds = impl_->renderer.leds();
+        ri = impl_->renderer.info();
+        phase = impl_->renderer.phase();
+        ma = impl_->renderer.current_ma();
+        last_frame = impl_->renderer.last_frame_time();
+        driving = impl_->renderer.driving();
+    }
+    const bool demo_now = info.demo_showing && !st.live;
+    const int nlamps = static_cast<int>(channels.size());
+
+    cJSON* root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "schema", "ambilight-monitor/1");
+    cJSON_AddBoolToObject(root, "demo", demo_now);
+    cJSON_AddStringToObject(root, "platform", "esp32");
+    // v0.37: JointSpace (the TV's own sides) when it is live
+    std::vector<jointspace::Zone> jl, jt, jr;
+    std::string js_status, js_error;
+    double js_age = -1.0, js_fps = 0.0, cw = 0.0;
+    {
+        std::lock_guard<std::mutex> lk(impl_->state_mu);
+        js_status = impl_->js_status;
+        js_error = impl_->js_error;
+        if (impl_->js_ok_time >= 0) js_age = now - impl_->js_ok_time;
+        while (!impl_->js_times.empty() && now - impl_->js_times.front() > 5.0) impl_->js_times.pop_front();
+        js_fps = impl_->js_times.size() / 5.0;
+        cw = impl_->corner_weight;
+        if (js_status == "live" && js_age >= 0 && js_age <= Impl::kJsMaxAgeS) {
+            jl = impl_->js_left;
+            jt = impl_->js_top;
+            jr = impl_->js_right;
+        } else if (js_status == "live") {
+            js_status = "stale";
+        }
+    }
+    auto zones = [](const std::vector<jointspace::Zone>& v) {
+        cJSON* a = cJSON_CreateArray();
+        for (const auto& z : v) cJSON_AddItemToArray(a, rgb_array(z.r, z.g, z.b));
+        return a;
+    };
+    cJSON* topo = cJSON_CreateObject();
+    cJSON_AddNumberToObject(topo, "layers", 1);
+    cJSON_AddNumberToObject(topo, "left", static_cast<double>(jl.size()));
+    cJSON_AddNumberToObject(topo, "top", static_cast<double>(jt.size()));
+    cJSON_AddNumberToObject(topo, "right", static_cast<double>(jr.size()));
+    cJSON_AddNumberToObject(topo, "bottom", 0);
+    cJSON_AddItemToObject(root, "topology", topo);
+    cJSON* sides = cJSON_CreateObject();
+    cJSON_AddItemToObject(sides, "left", zones(jl));
+    cJSON_AddItemToObject(sides, "top", zones(jt));
+    cJSON_AddItemToObject(sides, "right", zones(jr));
+    cJSON_AddItemToObject(root, "sides", sides);
+
+    // the Hue lamps: the last frame as received (only while it is live)
+    const double age_s = last_frame >= 0 ? now - last_frame : -1.0;
+    cJSON* bottom = cJSON_CreateArray();
+    for (int i = 0; i < nlamps; ++i) {
+        const huestream::Channel& ch = channels[static_cast<size_t>(i)];
+        cJSON* lo = cJSON_CreateObject();
+        cJSON_AddStringToObject(lo, "id", std::to_string(i + 1).c_str());
+        const std::string name = i < static_cast<int>(impl_->lamp_names.size()) ? impl_->lamp_names[static_cast<size_t>(i)]
+                                                                                : "Lamp " + std::to_string(i + 1);
+        cJSON_AddStringToObject(lo, "name", name.c_str());
+        if (st.live) {
+            color_pipeline::RGB8 rgb;
+            if (colorspace == 1) {
+                const double x = ch.a / 65535.0, y = ch.b / 65535.0, bri = ch.c / 65535.0 * 254.0;
+                rgb = color_pipeline::xy_bri_to_rgb(x, y, bri);
+                cJSON* xy = cJSON_CreateArray();
+                cJSON_AddItemToArray(xy, cJSON_CreateNumber(x));
+                cJSON_AddItemToArray(xy, cJSON_CreateNumber(y));
+                cJSON_AddItemToObject(lo, "xy", xy);
+                cJSON_AddNumberToObject(lo, "bri8", ch.c / 257.0);
+            } else {
+                rgb = {color_pipeline::rgb16_to_8(ch.a), color_pipeline::rgb16_to_8(ch.b), color_pipeline::rgb16_to_8(ch.c)};
+                cJSON_AddNullToObject(lo, "xy");
+                cJSON_AddNullToObject(lo, "bri8");
+            }
+            cJSON_AddItemToObject(lo, "rgb", rgb_array(rgb.r, rgb.g, rgb.b));
+            cJSON* raw = cJSON_CreateArray();
+            cJSON_AddItemToArray(raw, cJSON_CreateNumber(ch.a));
+            cJSON_AddItemToArray(raw, cJSON_CreateNumber(ch.b));
+            cJSON_AddItemToArray(raw, cJSON_CreateNumber(ch.c));
+            cJSON_AddItemToObject(lo, "raw16", raw);
+            cJSON_AddNumberToObject(lo, "age_ms", age_s < 0 ? 0.0 : age_s * 1000.0);
+        } else {
+            cJSON_AddNullToObject(lo, "rgb");
+            cJSON_AddNullToObject(lo, "xy");
+            cJSON_AddNullToObject(lo, "bri8");
+            cJSON_AddNullToObject(lo, "raw16");
+            cJSON_AddNullToObject(lo, "age_ms");
+        }
+        cJSON_AddItemToArray(bottom, lo);
+    }
+    cJSON_AddItemToObject(root, "bottom", bottom);
+
+    cJSON* sources = cJSON_CreateObject();
+    cJSON* js = cJSON_CreateObject();
+    cJSON_AddStringToObject(js, "status", js_status.c_str());
+    if (js_error.empty()) cJSON_AddNullToObject(js, "error");
+    else cJSON_AddStringToObject(js, "error", js_error.c_str());
+    if (js_age >= 0) cJSON_AddNumberToObject(js, "age_ms", js_age * 1000.0);
+    else cJSON_AddNullToObject(js, "age_ms");
+    cJSON_AddNumberToObject(js, "fps", js_fps);
+    cJSON_AddItemToObject(sources, "jointspace", js);
+    cJSON* hue = cJSON_CreateObject();
+    const char* hue_status = demo_now ? "demo" : st.live ? "live" : !st.stream_active ? "inactive" : last_frame < 0 ? "waiting" : "stale";
+    cJSON_AddStringToObject(hue, "status", hue_status);
+    if (age_s >= 0) cJSON_AddNumberToObject(hue, "age_ms", age_s * 1000.0);
+    else cJSON_AddNullToObject(hue, "age_ms");
+    cJSON_AddNumberToObject(hue, "fps", st.fps);
+    cJSON_AddNumberToObject(hue, "frames", static_cast<double>(st.frames));
+    cJSON_AddNumberToObject(hue, "bad_frames", static_cast<double>(bad));
+    if (version.empty()) cJSON_AddNullToObject(hue, "version");
+    else cJSON_AddStringToObject(hue, "version", version.c_str());
+    if (colorspace < 0) cJSON_AddNullToObject(hue, "colorspace");
+    else cJSON_AddNumberToObject(hue, "colorspace", colorspace);
+    if (st.old_session) {  // v0.37: the page's "old session" banner (the bridge is nudging the TV to reconnect)
+        cJSON* old = cJSON_CreateObject();
+        std::string ip;
+        unsigned long nudges;
+        {
+            std::lock_guard<std::mutex> lk(impl_->state_mu);
+            ip = impl_->old_session_ip;
+            nudges = impl_->nudges;
+        }
+        cJSON_AddStringToObject(old, "ip", ip.c_str());
+        cJSON_AddNumberToObject(old, "packets", 0);
+        cJSON_AddNumberToObject(old, "lamp_checks_failed", static_cast<double>(nudges));
+        cJSON_AddItemToObject(hue, "old_session", old);
+    } else {
+        cJSON_AddNullToObject(hue, "old_session");
+    }
+    if (st.tv_locked) {
+        cJSON* l = cJSON_CreateObject();
+        cJSON_AddStringToObject(l, "reason", st.tv_lock_reason.c_str());
+        cJSON_AddStringToObject(l, "detail", st.tv_lock_detail.c_str());
+        cJSON_AddNumberToObject(l, "age_s", st.tv_lock_age_s);
+        cJSON_AddBoolToObject(l, "confirmed", st.tv_lock_confirmed);
+        cJSON_AddItemToObject(hue, "tv_dtls_lock", l);
+    } else {
+        cJSON_AddNullToObject(hue, "tv_dtls_lock");
+    }
+    if (st.handshake_latency_s < 0) cJSON_AddNullToObject(hue, "handshake_latency_s");
+    else cJSON_AddNumberToObject(hue, "handshake_latency_s", st.handshake_latency_s);
+    cJSON_AddItemToObject(sources, "hue", hue);
+    cJSON_AddItemToObject(root, "sources", sources);
+
+    // the strip: the TV's frame as computed (also while stopped: then it is not shown),
+    // or WLED's demo pixels
+    cJSON* output = cJSON_CreateObject();
+    const bool show_tv = driving && !leds.empty() && !demo_now;
+    const bool show_demo = demo_now && !info.demo_leds.empty();
+    cJSON_AddBoolToObject(output, "available", show_tv || show_demo);
+    if (show_tv || show_demo) {
+        cJSON* arr = cJSON_CreateArray();
+        if (show_tv)
+            for (const auto& c : leds) cJSON_AddItemToArray(arr, rgb_array(c.r, c.g, c.b));
+        else
+            for (const auto& c : info.demo_leds) cJSON_AddItemToArray(arr, rgb_array(c.r, c.g, c.b));
+        cJSON_AddItemToObject(output, "leds", arr);
+    } else {
+        cJSON_AddNullToObject(output, "leds");
+    }
+    cJSON_AddStringToObject(output, "space", "led_pwm_linear");
+    cJSON_AddNumberToObject(output, "estimated_ma", show_tv ? ma : show_demo ? info.demo_ma : 0.0);
+    // v0.49.2: what the limiter works to (the port's limit minus the board's share), so the meter reaches 100 %
+    cJSON_AddNumberToObject(output, "budget_ma", color_pipeline::effective_budget_ma(s));
+    cJSON_AddNumberToObject(output, "port_budget_ma", s.current_budget_ma);
+    cJSON_AddNumberToObject(output, "ma_per_led_full_white", s.ma_per_led_full_white);
+    cJSON_AddNumberToObject(output, "used_anchors", ri.used_anchors);
+    cJSON* lim = cJSON_CreateObject();
+    cJSON_AddStringToObject(lim, "mode", show_tv && phase == "live" ? ri.limit_mode : "none");
+    cJSON_AddNumberToObject(lim, "peak_emphasis", s.peak_emphasis);
+    cJSON_AddNumberToObject(lim, "peak_scale", ri.peak_scale);
+    cJSON_AddNumberToObject(lim, "min_scale", ri.min_scale);
+    cJSON* pk = cJSON_CreateArray();
+    if (show_tv)
+        for (int p : ri.peak_leds) cJSON_AddItemToArray(pk, cJSON_CreateNumber(p));
+    cJSON_AddItemToObject(lim, "peak_leds", pk);
+    cJSON_AddNumberToObject(lim, "rise_ms", s.rise_ms);
+    cJSON_AddNumberToObject(lim, "lamp_inset", s.lamp_inset);
+    cJSON_AddStringToObject(lim, "blend_mode", color_pipeline::blend_mode_name(s.blend_mode));
+    cJSON_AddStringToObject(lim, "corner_mode", color_pipeline::corner_mode_name(s.corner_mode));
+    cJSON_AddNumberToObject(lim, "blend_softness", s.blend_softness);
+    const int lc = nlamps > 0 ? nlamps : impl_->config.lamps;
+    cJSON_AddNumberToObject(lim, "peak_drift_leds", color_pipeline::peak_drift_amplitude(s, lc));
+    cJSON_AddNumberToObject(lim, "peak_offset_leds", std::round(ri.peak_offset_leds * 100) / 100);
+    cJSON_AddNumberToObject(lim, "wear_strength", 0);
+    cJSON_AddBoolToObject(lim, "wear_applied", false);
+    cJSON_AddBoolToObject(lim, "peak_drift_auto", s.peak_drift_leds < 0.0);
+    cJSON_AddStringToObject(lim, "peak_drift_shape", color_pipeline::drift_shape_name(s.peak_drift_shape));
+    cJSON_AddBoolToObject(lim, "end_lamps", color_pipeline::end_lamps_active(s, lc));
+    cJSON_AddStringToObject(lim, "strip_layout", color_pipeline::strip_layout_name(s.strip_layout));
+    cJSON_AddNumberToObject(lim, "edge_leds", s.edge_leds);
+    cJSON_AddNumberToObject(lim, "edge_strength", s.edge_strength);
+    cJSON_AddStringToObject(lim, "edge_source",
+                            color_pipeline::edge_source_name(color_pipeline::edge_source_resolved(s, lc)));
+    cJSON_AddStringToObject(lim, "edge_source_setting", color_pipeline::edge_source_name(s.edge_source));
+    cJSON_AddNumberToObject(lim, "corner_weight", std::round(cw * 100) / 100);
+    cJSON_AddStringToObject(lim, "output_phase", demo_now ? "live" : phase.c_str());
+    cJSON_AddNumberToObject(lim, "wanted_ma", show_tv ? std::round(ri.wanted_ma) : 0.0);
+    cJSON_AddNumberToObject(lim, "target_ma", show_tv ? ma : 0.0);
+    cJSON_AddItemToObject(output, "limit", lim);
+    cJSON_AddNullToObject(output, "compare_pe0");
+    cJSON_AddStringToObject(output, "note", demo_now ? "WLED's demo effect: WLED's pixels and its own current estimate"
+                                                     : "computed on the ESP (StreamRenderer), linear LED PWM values; estimate, not measured");
+    cJSON* wled = cJSON_CreateObject();
+    cJSON_AddBoolToObject(wled, "enabled", impl_->running.load());
+    cJSON_AddStringToObject(wled, "target", info.output_target.c_str());
+    cJSON_AddNumberToObject(wled, "fps", info.output_fps);
+    cJSON_AddNumberToObject(wled, "frames", 0);
+    cJSON_AddNumberToObject(wled, "errors", 0);
+    cJSON_AddNullToObject(wled, "last_error");
+    cJSON_AddItemToObject(output, "wled", wled);
+    cJSON_AddItemToObject(root, "output", output);
+
+    cJSON* ident = cJSON_CreateObject();
+    cJSON_AddStringToObject(ident, "name", impl_->identity.name.c_str());
+    cJSON_AddStringToObject(ident, "mac", impl_->identity.mac.c_str());
+    cJSON_AddStringToObject(ident, "bridgeid", impl_->identity.bridgeid.c_str());
+    cJSON_AddStringToObject(ident, "ip", impl_->identity.ip.c_str());
+    cJSON_AddItemToObject(root, "identity", ident);
+    cJSON_AddNumberToObject(root, "pairing_known_users", st.paired_users);
+    cJSON_AddBoolToObject(root, "control_enabled", false);
+    cJSON_AddStringToObject(root, "bridge_version", info.version.c_str());
+    cJSON_AddBoolToObject(root, "restart_available", false);
+    cJSON_AddStringToObject(root, "service", impl_->running ? "running" : "stopped");
+    cJSON_AddBoolToObject(root, "service_controls", true);
+    cJSON* link = cJSON_CreateObject();
+    cJSON_AddBoolToObject(link, "required", true);
+    cJSON_AddNumberToObject(link, "remaining_ms", static_cast<double>(st.link_remaining_ms));
+    cJSON_AddBoolToObject(link, "tv_waiting", st.tv_wants_pair);
+    cJSON_AddNullToObject(link, "refused_ago_ms");
+    cJSON_AddNullToObject(link, "paired_ago_ms");
+    cJSON_AddItemToObject(root, "link_button", link);
+
+    const Demo d = demo();
+    cJSON* dj = cJSON_CreateObject();
+    cJSON_AddBoolToObject(dj, "on", d.on);
+    cJSON_AddBoolToObject(dj, "showing", demo_now);
+    cJSON_AddNumberToObject(dj, "fx", info.demo_fx >= 0 ? info.demo_fx : d.fx);
+    cJSON_AddStringToObject(dj, "fx_name", info.demo_fx_name.c_str());
+    cJSON_AddNumberToObject(dj, "bri_pct", d.bri_pct);
+    cJSON_AddNumberToObject(dj, "speed", d.speed);
+    cJSON_AddItemToObject(root, "esp_demo", dj);
+    cJSON* dev = cJSON_CreateObject();
+    cJSON_AddNumberToObject(dev, "wled_led_count", info.wled_led_count);
+    cJSON_AddNumberToObject(dev, "free_heap", static_cast<double>(info.free_heap));
+    cJSON_AddBoolToObject(dev, "can_edit", info.can_edit);
+    cJSON_AddNumberToObject(dev, "loop_count", static_cast<double>(info.loop_count));
+    cJSON_AddNumberToObject(dev, "heap_total", static_cast<double>(info.heap_total));
+    cJSON_AddNumberToObject(dev, "heap_min", static_cast<double>(info.heap_min));
+    cJSON_AddNumberToObject(dev, "heap_max_block", static_cast<double>(info.heap_max_block));
+    cJSON_AddNumberToObject(dev, "app_size", static_cast<double>(info.app_size));
+    cJSON_AddNumberToObject(dev, "app_slot", static_cast<double>(info.app_slot));
+    cJSON_AddNumberToObject(dev, "flash_size", static_cast<double>(info.flash_size));
+    cJSON_AddNumberToObject(dev, "fs_used", static_cast<double>(info.fs_used));
+    cJSON_AddNumberToObject(dev, "fs_total", static_cast<double>(info.fs_total));
+    const ambi_dtls::Stats ds = ambi_dtls::stats();
+    cJSON_AddNumberToObject(dev, "dtls_accept_turns", static_cast<double>(ds.accept_turns));
+    cJSON_AddNumberToObject(dev, "dtls_select_errors", static_cast<double>(ds.select_errors));
+    cJSON_AddNumberToObject(dev, "dtls_peek_errors", static_cast<double>(ds.peek_errors));
+    cJSON_AddNumberToObject(dev, "dtls_fd", ds.fd);
+    cJSON_AddItemToObject(root, "device", dev);
+    return print_and_delete(root);
+}
+
+
+// ---- v0.37: JointSpace ------------------------------------------------------------
+
+// v0.47: memory guard for the JointSpace TLS connection (see Platform::heap)
+namespace {
+constexpr size_t kJsMinFree = 80000;   // to open a connection: free heap ...
+// v0.49: was 45000 - but a TLS connection allocates ~17 KB pieces (2 x 16 KB record buffers + small
+// ones), and after a low-heap moment the heap stayed fragmented (90-100 KB free, largest block
+// 41 KB): JointSpace never came back (v0.48 on the device, 2026-11-20).
+constexpr size_t kJsMinBlock = 20000;  // ... and the largest block
+constexpr size_t kJsDropFree = 22000;  // while connected: below this, close it (frees ~45 KB)
+constexpr double kJsSettleS = 4.0;     // after the Hue stream starts (its DTLS handshake first)
+constexpr double kJsLowMemPauseS = 30.0;
+}  // namespace
+
+void App::run_jointspace() {
+    Impl* m = impl_;
+    m->load_js();
+    jointspace::Client client;
+    bool connected = false;  // a connection is (probably) open: close it when the TV stops streaming
+    double stream_since = -1.0, lowmem_until = -1.0;
+    auto heap_ok = [m](size_t min_free, size_t min_block) {
+        if (!m->platform.heap) return true;
+        size_t f = 0, b = 0;
+        m->platform.heap(&f, &b);
+        return f >= min_free && b >= min_block;
+    };
+    auto heap_low = [m]() {
+        if (!m->platform.heap) return false;
+        size_t f = 0, b = 0;
+        m->platform.heap(&f, &b);
+        return f < kJsDropFree;
+    };
+    int failures = 0;
+    std::string prev;
+    auto set_status = [m](const char* status, const std::string& error) {
+        std::lock_guard<std::mutex> lk(m->state_mu);
+        m->js_status = status;
+        m->js_error = error;
+    };
+    while (!m->stop) {
+        // v0.45: a pairing asked for from the page (one step at a time; polling pauses meanwhile)
+        int cmd = 0;
+        std::string pair_ip, pair_pin;
+        jointspace::PairState pair_st;
+        {
+            std::lock_guard<std::mutex> lk(m->js_mu);
+            cmd = m->js_pair_cmd;
+            m->js_pair_cmd = 0;
+            pair_ip = m->js_pair_ip;
+            pair_pin = m->js_pair_pin;
+            pair_st = m->js_pair;
+            if (m->js_pair_state == "waiting_pin" && m->js_pair_deadline > 0 && mono_s() > m->js_pair_deadline) {
+                m->js_pair_state = "failed";
+                m->js_pair_error = "pin_timeout";
+            }
+        }
+        if (cmd) {
+            if (connected) {
+                client.reset();
+                connected = false;
+            }
+            std::string err;
+            if (!heap_ok(kJsMinFree, kJsMinBlock)) {  // v0.47
+                std::lock_guard<std::mutex> lk(m->js_mu);
+                m->js_pair_state = "failed";
+                m->js_pair_error = "low_memory";
+                m->js_pair_time = mono_s();
+                continue;
+            }
+            if (cmd == 1) {
+                jointspace::PairState st;
+                const bool ok = jointspace::pair_request(pair_ip, "AmbiBottom", st, err);
+                std::lock_guard<std::mutex> lk(m->js_mu);
+                m->js_pair_time = mono_s();
+                if (ok) {
+                    m->js_pair = st;
+                    m->js_pair_state = "waiting_pin";
+                    m->js_pair_error.clear();
+                    m->js_pair_deadline = mono_s() + (st.timeout_s > 0 ? st.timeout_s : 60);
+                } else {
+                    m->js_pair_state = "failed";
+                    m->js_pair_error = err;
+                }
+            } else {
+                const bool ok = jointspace::pair_grant(pair_ip, pair_st, pair_pin, err);
+                bool saved = true;
+                if (ok && m->platform.save)
+                    saved = m->platform.save("js_user", pair_st.device_id) && m->platform.save("js_pass", pair_st.auth_key) &&
+                            m->platform.save("js_ip", pair_ip);
+                std::lock_guard<std::mutex> lk(m->js_mu);
+                m->js_pair_time = mono_s();
+                m->js_pair_pin.clear();
+                if (ok) {
+                    m->js_user = pair_st.device_id;
+                    m->js_pass = pair_st.auth_key;
+                    m->js_ip = pair_ip;
+                    m->js_pair = jointspace::PairState();
+                    m->js_pair_state = saved ? "done" : "failed";
+                    m->js_pair_error = saved ? "" : "save_failed";
+                } else {
+                    // a wrong PIN can be typed again while the TV still waits
+                    m->js_pair_state = (err == "invalid_pin" && mono_s() < m->js_pair_deadline) ? "waiting_pin" : "failed";
+                    m->js_pair_error = err;
+                }
+            }
+            m->add_log(std::string("JointSpace pairing: ") + (cmd == 1 ? "request" : "PIN") + " -> " + (err.empty() ? "ok" : err));
+            continue;
+        }
+        std::string user, pass, ip;
+        {
+            std::lock_guard<std::mutex> lk(m->js_mu);
+            user = m->js_user;
+            pass = m->js_pass;
+            ip = m->js_ip;
+        }
+        bool streaming;
+        {
+            std::lock_guard<std::mutex> lk(m->state_mu);
+            if (ip.empty()) ip = m->tv_ip_seen;
+            const double last = m->renderer.last_frame_time();
+            streaming = m->stream_active || (last >= 0 && mono_s() - last < 10.0);
+        }
+        if (ip.empty()) ip = m->config.tv_ip;
+        if (!streaming) stream_since = -1.0;
+        else if (stream_since < 0) stream_since = mono_s();
+        const std::string key = ip + "\n" + user + "\n" + pass;
+        if (key != prev) {
+            prev = key;
+            failures = 0;
+        }
+        int delay_ms = 300;  // the Linux bridge's --js-interval 0.3
+        if (!m->js_on) {  // v0.48: switched off on the page
+            if (connected) {
+                client.reset();
+                connected = false;
+            }
+            set_status("off", "");
+            delay_ms = 1000;
+        } else if (user.empty() || pass.empty()) {
+            set_status("not_configured", "");
+            delay_ms = 1000;
+        } else if (!streaming || ip.empty() || m->js_paused) {
+            // only while the TV streams Hue: no connection held (≈45 KB of heap) otherwise.
+            // v0.42: also not while a firmware update is being received (it needs the heap)
+            if (connected) {
+                client.reset();
+                connected = false;
+                AMBI_LOG(m->js_paused ? "[js] firmware update: JointSpace connection closed\n"
+                                      : "[js] TV not streaming: JointSpace connection closed\n");
+            }
+            set_status(m->js_paused ? "paused" : "inactive", ip.empty() ? "no_tv_address" : "");
+            delay_ms = 500;
+        } else if (connected && heap_low()) {
+            // v0.47: the heap is running out: give back the connection's ~45 KB, pause a while
+            client.reset();
+            connected = false;
+            lowmem_until = mono_s() + kJsLowMemPauseS;
+            set_status("unavailable", "low_memory");
+            {
+                std::lock_guard<std::mutex> lk(m->state_mu);
+                m->js_lowmem++;
+            }
+            AMBI_LOG("[js] low memory: JointSpace connection closed for %.0f s\n", kJsLowMemPauseS);
+            delay_ms = 1000;
+        } else if (!connected && (mono_s() - stream_since < kJsSettleS || mono_s() < lowmem_until ||
+                                  !heap_ok(kJsMinFree, kJsMinBlock))) {
+            // v0.47: not yet - the Hue stream's handshake first, then only with enough memory
+            if (mono_s() - stream_since >= kJsSettleS) set_status("unavailable", "low_memory");
+            delay_ms = 1000;
+        } else {
+            jointspace::Sides sides;
+            std::string err;
+            const double t0 = mono_s();
+            const bool ok = client.fetch(ip, user, pass, sides, err, 3000);
+            connected = true;
+            const double now = mono_s();
+            if (ok) {
+                failures = 0;
+                std::lock_guard<std::mutex> lk(m->state_mu);
+                m->js_left = std::move(sides.left);
+                m->js_top = std::move(sides.top);
+                m->js_right = std::move(sides.right);
+                m->js_ok_time = now;
+                m->js_fail_streak = 0;  // v0.44
+                m->js_status = "live";
+                m->js_error.clear();
+                m->js_times.push_back(now);
+                while (!m->js_times.empty() && now - m->js_times.front() > 5.0) m->js_times.pop_front();
+            } else {
+                failures = std::min(failures + 1, 4);
+                delay_ms = std::max(delay_ms, static_cast<int>(std::min(5000.0, 500.0 * (1 << failures))));
+                if (err == "authentication_failed") delay_ms = 10000;  // do not hammer a TV that says no
+                if (failures == 1) AMBI_LOG("[js] %s: %s\n", ip.c_str(), err.c_str());
+                set_status("unavailable", err);
+                {
+                    std::lock_guard<std::mutex> lk(m->state_mu);  // v0.44: diagnostics
+                    m->js_fail++;
+                    m->js_fail_streak++;
+                }
+            }
+            delay_ms = std::max(0, delay_ms - static_cast<int>((now - t0) * 1000.0));
+        }
+        m->js_conn = connected;  // v0.48
+        for (int waited = 0; waited < delay_ms && !m->stop; waited += 50) {
+            {
+                std::lock_guard<std::mutex> lk(m->js_mu);
+                if (m->js_pair_cmd) break;  // v0.45: a pairing step waits: at once
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(50));
+        }
+    }
+}
+
+int App::js_pair_start(const std::string& body, std::string* reply) {
+    impl_->load_js();
+    std::string ip;
+    {
+        cJSON* j = cJSON_Parse(body.c_str());
+        const cJSON* v = j ? cJSON_GetObjectItemCaseSensitive(j, "tv_ip") : nullptr;
+        if (cJSON_IsString(v) && v->valuestring) ip = v->valuestring;
+        if (j) cJSON_Delete(j);
+    }
+    if (ip.empty()) {
+        std::lock_guard<std::mutex> lk(impl_->js_mu);
+        ip = impl_->js_ip;
+    }
+    if (ip.empty()) {
+        std::lock_guard<std::mutex> lk(impl_->state_mu);
+        ip = impl_->tv_ip_seen;
+    }
+    if (ip.empty()) ip = impl_->config.tv_ip;
+    if (ip.empty() || ip.size() > 45 || ip.find_first_not_of("0123456789.") != std::string::npos) {
+        *reply = "{\"error\":\"tv_address_unknown\"}";
+        return 409;
+    }
+    {
+        std::lock_guard<std::mutex> lk(impl_->js_mu);
+        impl_->js_pair_ip = ip;
+        impl_->js_pair_cmd = 1;
+        impl_->js_pair_state = "requesting";
+        impl_->js_pair_error.clear();
+        impl_->js_pair_deadline = -1.0;
+    }
+    note("JointSpace pairing started with " + ip + " (the TV shows a PIN)");
+    *reply = js_pair_json();
+    return 200;
+}
+
+int App::js_pair_pin(const std::string& body, std::string* reply) {
+    std::string pin;
+    {
+        cJSON* j = cJSON_Parse(body.c_str());
+        const cJSON* v = j ? cJSON_GetObjectItemCaseSensitive(j, "pin") : nullptr;
+        if (cJSON_IsString(v) && v->valuestring) pin = v->valuestring;
+        if (j) cJSON_Delete(j);
+    }
+    if (pin.empty() || pin.size() > 8 || pin.find_first_not_of("0123456789") != std::string::npos) {
+        *reply = "{\"error\":\"pin_digits\"}";
+        return 422;
+    }
+    {
+        std::lock_guard<std::mutex> lk(impl_->js_mu);
+        if (impl_->js_pair_state != "waiting_pin") {
+            *reply = "{\"error\":\"no_pairing_waiting\"}";
+            return 409;
+        }
+        impl_->js_pair_pin = pin;
+        impl_->js_pair_cmd = 2;
+        impl_->js_pair_state = "granting";
+    }
+    *reply = js_pair_json();
+    return 200;
+}
+
+bool App::js_connected() const { return impl_->js_conn; }
+
+std::string App::js_pair_json() {
+    std::lock_guard<std::mutex> lk(impl_->js_mu);
+    const double now = mono_s();
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddStringToObject(o, "state", impl_->js_pair_state.c_str());
+    cJSON_AddStringToObject(o, "error", impl_->js_pair_error.c_str());
+    cJSON_AddStringToObject(o, "tv_ip", impl_->js_pair_ip.c_str());
+    cJSON_AddNumberToObject(o, "timeout_s",
+                            impl_->js_pair_deadline > 0 ? std::max(0.0, std::round(impl_->js_pair_deadline - now)) : 0.0);
+    cJSON_AddNumberToObject(o, "age_s", impl_->js_pair_time < 0 ? -1.0 : std::round(now - impl_->js_pair_time));
+    return print_and_delete(o);
+}
+
+std::string App::jointspace_settings_json(bool can_edit) {
+    impl_->load_js();
+    std::string user, pass, ip, seen;
+    {
+        std::lock_guard<std::mutex> lk(impl_->js_mu);
+        user = impl_->js_user;
+        pass = impl_->js_pass;
+        ip = impl_->js_ip;
+    }
+    {
+        std::lock_guard<std::mutex> lk(impl_->state_mu);
+        seen = impl_->tv_ip_seen;
+    }
+    cJSON* o = cJSON_CreateObject();
+    cJSON_AddBoolToObject(o, "available", true);
+    cJSON_AddBoolToObject(o, "can_edit", can_edit);
+    cJSON_AddBoolToObject(o, "configured", !user.empty() && !pass.empty());
+    cJSON_AddBoolToObject(o, "persisted", !user.empty() && !pass.empty());
+    cJSON_AddBoolToObject(o, "load_error", false);
+    cJSON_AddBoolToObject(o, "enabled", impl_->js_on.load());  // v0.48
+    // the address only (never the user name or password)
+    cJSON_AddStringToObject(o, "tv_ip", !ip.empty() ? ip.c_str() : seen.c_str());
+    cJSON_AddStringToObject(o, "tv_ip_from", !ip.empty() ? "saved" : !seen.empty() ? "hue_stream" : "none");
+    return print_and_delete(o);
+}
+
+int App::post_jointspace_settings(const std::string& body, std::string* reply) {
+    cJSON* in = cJSON_Parse(body.c_str());
+    if (!cJSON_IsObject(in)) {
+        if (in) cJSON_Delete(in);
+        if (reply) *reply = "{\"error\":\"invalid_json\"}";
+        return 400;
+    }
+    auto str = [in](const char* k, std::string* out) {
+        cJSON* v = cJSON_GetObjectItemCaseSensitive(in, k);
+        if (!cJSON_IsString(v) || !v->valuestring) return false;
+        *out = v->valuestring;
+        return true;
+    };
+    std::string user, pass, ip;
+    const bool has_user = str("username", &user), has_pass = str("password", &pass), has_ip = str("tv_ip", &ip);
+    const cJSON* en = cJSON_GetObjectItemCaseSensitive(in, "enabled");  // v0.48
+    const bool has_en = cJSON_IsBool(en), en_v = cJSON_IsTrue(en);
+    cJSON_Delete(in);
+    auto field_ok = [](const std::string& v) {
+        if (v.empty() || v.size() > 512) return false;
+        for (char c : v)
+            if (c == '\0' || c == '\r' || c == '\n') return false;
+        return true;
+    };
+    if ((has_user || has_pass) && !(has_user && has_pass && field_ok(user) && field_ok(pass))) {
+        if (reply) *reply = "{\"error\":\"invalid_credentials\"}";
+        return 422;
+    }
+    if (has_ip && !ip.empty()) {
+        for (char c : ip)
+            if (!(std::isdigit(static_cast<unsigned char>(c)) || c == '.') || ip.size() > 15) {
+                if (reply) *reply = "{\"error\":\"invalid_address\"}";
+                return 422;
+            }
+    }
+    impl_->load_js();
+    {
+        std::lock_guard<std::mutex> lk(impl_->js_mu);
+        if (has_user) {
+            impl_->js_user = user;
+            impl_->js_pass = pass;
+        }
+        if (has_ip) impl_->js_ip = ip;
+    }
+    bool saved = true;
+    if (impl_->platform.save) {
+        if (has_user) saved = impl_->platform.save("js_user", user) && impl_->platform.save("js_pass", pass) && saved;
+        if (has_ip) saved = impl_->platform.save("js_ip", ip) && saved;
+        if (has_en) saved = impl_->platform.save("js_on", en_v ? "1" : "0") && saved;
+    }
+    if (has_en) {
+        impl_->js_on = en_v;
+        note(en_v ? "JointSpace on" : "JointSpace off (no connection to the TV's API)");
+    }
+    AMBI_LOG("[js] JointSpace settings changed from the page (credentials %s, address %s)\n", has_user ? "new" : "kept",
+             has_ip ? (ip.empty() ? "auto" : ip.c_str()) : "kept");
+    if (reply) {
+        std::string r = jointspace_settings_json(true);
+        if (!r.empty() && r.back() == '}') r.insert(r.size() - 1, saved ? ",\"saved\":true" : ",\"saved\":false");
+        *reply = r;
+    }
+    return 200;
+}
+
+void App::note(const std::string& text) { impl_->add_log(text); }
+
+std::string App::strip_stats_json(bool can_edit) {
+    std::string t = impl_->stats->to_json_text(impl_->epoch());
+    if (!t.empty() && t.back() == '}') {
+        t.pop_back();
+        t += can_edit ? ",\"can_edit\":true}" : ",\"can_edit\":false}";
+    }
+    return t;
+}
+
+void App::strip_stats_reset() {
+    impl_->stats->reset_since(impl_->epoch());
+    note("wear log: \"since reset\" totals cleared from the page");
+}
+
+void App::strip_stats_install() {
+    impl_->stats->reset_install(impl_->epoch());
+    note("wear log: strip marked as mounted now (\"since install\" started)");
+}
+
+bool App::save_stats_if_due() { return impl_->stats->save_if_due(impl_->epoch()); }
+
+std::string App::log_json() {
+    cJSON* arr = cJSON_CreateArray();
+    {
+        std::lock_guard<std::mutex> lk(impl_->log_mu);
+        for (const auto& l : impl_->log) {
+            cJSON* o = cJSON_CreateObject();
+            cJSON_AddNumberToObject(o, "t", std::round(l.t * 10) / 10);
+            cJSON_AddStringToObject(o, "e", l.text.c_str());
+            if (l.n > 1) {
+                cJSON_AddNumberToObject(o, "n", l.n);
+                cJSON_AddNumberToObject(o, "last", std::round(l.last * 10) / 10);
+            }
+            cJSON_AddItemToArray(arr, o);
+        }
+    }
+    return print_and_delete(arr);
+}
+
+}  // namespace ambi_bottom

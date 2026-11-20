@@ -1,0 +1,13 @@
+{
+  "name": "ambi_core",
+  "version": "0.32.0",
+  "description": "Bottom-Ambilight core shared by the Linux bridge and the WLED usermod: colour pipeline, HueStream parser, Hue v1 REST logic, TV-lock rules, settings validation.",
+  "frameworks": "*",
+  "platforms": "*",
+  "build": {
+    "srcDir": ".",
+    "includeDir": ".",
+    "flags": ["-std=gnu++17"],
+    "unflags": ["-std=gnu++11"]
+  }
+}

@@ -1,0 +1,8 @@
+{
+  "name": "AmbiBottom",
+  "version": "0.44.0",
+  "description": "AmbiBottom usermod for WLED 16 (custom_usermods). The WLED 0.15 build includes usermod_ambibottom.h through install.sh instead and does not compile this folder.",
+  "frameworks": "arduino",
+  "platforms": "espressif32",
+  "build": { "libArchive": false, "flags": ["-std=gnu++17"], "unflags": ["-std=gnu++11"] }
+}
