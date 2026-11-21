@@ -50,6 +50,7 @@ ol{margin:6px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
 #mmBot{display:flex;gap:10px;align-items:center;padding:10px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom));background:rgba(15,20,22,.92);border-top:1px solid var(--line)}
 #mmGo{flex:1;font-size:19px;padding:16px}
 #mmX{flex:none;width:52px;height:52px;padding:0;font-size:22px}
+#mmCount{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:96px;font-weight:800;color:#fff;text-shadow:0 2px 12px #000;display:none;line-height:1}
 #mmAlert{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);background:rgba(224,176,64,.95);color:#1b1400;font-weight:700;padding:10px 16px;border-radius:10px;display:none;line-height:1.3;text-align:center}
 </style>
 </head>
@@ -91,12 +92,12 @@ ol{margin:6px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
 
 <div id="mm">
   <div id="mmTop"><div id="mmPhase"></div><div id="mmMsg"></div><div id="mmVals"></div><div id="mmBar"><b></b></div></div>
-  <div id="mmStage"><div id="mmWrap"><video id="vid" playsinline muted></video><canvas id="ov"></canvas><div id="mmAlert"></div></div></div>
+  <div id="mmStage"><div id="mmWrap"><video id="vid" playsinline muted></video><canvas id="ov"></canvas><div id="mmCount"></div><div id="mmAlert"></div></div></div>
   <div id="mmBot"><button class="btn" id="mmX" aria-label="close">✕</button><button class="btn pri" id="mmGo"></button></div>
 </div>
 <canvas id="cv" style="display:none"></canvas>
 <script>
-const PAGE_VERSION='0.4';
+const PAGE_VERSION='0.5';
 const T={
  en:{title:'colour measurement',intro:'Measurement only: it finds out how your strip and your TV really look on your wall, so the colour correction can be computed. Nothing is changed for good; at the end everything is as before. About 3 minutes.',
   i1:'11 colours on the TV, the strip as it is now (1 min).',i2:'The same colours, the strip dark for a while (a preview, not saved) (1 min).',i3:'The TV turns BLACK on purpose for about 30 s and the strip shows its own red, green, blue.',
@@ -111,7 +112,7 @@ const T={
   mLocking:'Locking: the TV shows white, the camera settles…',mDark:'Darker, something was too bright…',
   mReady:'Locked. Keep the phone still and press Start.',mClip:'Still too bright here: move a box off the brightest spot.',
   phC:'1 / 3 · The TV plays 11 colours, the strip as it is now',phB:'2 / 3 · The same colours, the strip dark for a while',phA:'3 / 3 · The TV is BLACK on purpose (30 s): the strip shows red, green, blue',
-  again:'measuring again: ',moved:'Moved – hold still',restore:'Putting everything back…',done:'Done. Press «See the results».',stopped:'Stopped, everything put back.',
+  cd:'Starts in %s s – set the phone down and let go',again:'measuring again: ',moved:'Moved – hold still',restore:'Putting everything back…',done:'Done. Press «See the results».',stopped:'Stopped, everything put back.',
   noLock:'This camera cannot lock exposure / white balance.',copied:'Copied.',
   sumT:'Before (C): TV glow vs bottom, colour difference (smaller = better)',col:'Colour',diff:'Δ',bri:'bottom / TV',retakes:'measured again',unstable:'still unsteady'},
  el:{title:'μέτρηση χρώματος',intro:'Μόνο μέτρηση: βρίσκει πώς φαίνονται πραγματικά η ταινία σου και η TV σου στον τοίχο, για να υπολογιστεί η διόρθωση χρώματος. Δεν αλλάζει τίποτα μόνιμα· στο τέλος όλα είναι όπως πριν. Περίπου 3 λεπτά.',
@@ -127,7 +128,7 @@ const T={
   mLocking:'Κλείδωμα: η TV δείχνει λευκό, η κάμερα ηρεμεί…',mDark:'Πιο σκοτεινά, κάτι ήταν πολύ φωτεινό…',
   mReady:'Κλειδώθηκε. Κράτα το κινητό ακίνητο και πάτα Έναρξη.',mClip:'Ακόμα πολύ φωτεινό εδώ: μετακίνησε το κουτάκι από το πιο φωτεινό σημείο.',
   phC:'1 / 3 · Η TV παίζει 11 χρώματα, η ταινία όπως είναι τώρα',phB:'2 / 3 · Τα ίδια χρώματα, η ταινία σβηστή για λίγο',phA:'3 / 3 · Η TV είναι ΕΠΙΤΗΔΕΣ μαύρη (30 s): η ταινία δείχνει κόκκινο, πράσινο, μπλε',
-  again:'ξαναμετράω: ',moved:'Κουνήθηκε – κράτα σταθερά',restore:'Επαναφορά όλων…',done:'Τέλος. Πάτα «Δες τα αποτελέσματα».',stopped:'Διακόπηκε, όλα επανήλθαν.',
+  cd:'Ξεκινάει σε %s s – στήσε το κινητό και άφησέ το',again:'ξαναμετράω: ',moved:'Κουνήθηκε – κράτα σταθερά',restore:'Επαναφορά όλων…',done:'Τέλος. Πάτα «Δες τα αποτελέσματα».',stopped:'Διακόπηκε, όλα επανήλθαν.',
   noLock:'Η κάμερα δεν μπορεί να κλειδώσει έκθεση / white balance.',copied:'Αντιγράφηκε.',
   sumT:'Πριν (C): λάμψη TV vs κάτω, διαφορά χρώματος (μικρότερο = καλύτερα)',col:'Χρώμα',diff:'Δ',bri:'κάτω / TV',retakes:'ξαναμετρήθηκαν',unstable:'ακόμα ασταθή'}};
 const $=id=>document.getElementById(id);
@@ -252,6 +253,11 @@ function unsteady(r,keys){if(r.motion>MOTION_LIMIT)return true;
   return keys.some(k=>{const s=r[k];if(!s||!s.m)return true;const i=s.m.indexOf(Math.max(...s.m));return s.m[i]>0.003&&s.sd[i]>0.08;});}
 function alertMoved(on){const a=$('mmAlert');a.textContent=t('moved');a.style.display=on?'block':'none';}
 
+// short beeps: the countdown, the start and the end can be heard without looking at the phone
+let actx=null;
+function beep(f,ms){try{actx=actx||new (window.AudioContext||window.webkitAudioContext)();if(actx.state==='suspended')actx.resume();
+  const o=actx.createOscillator(),g=actx.createGain();o.frequency.value=f;g.gain.value=0.08;o.connect(g);g.connect(actx.destination);o.start();o.stop(actx.currentTime+ms/1000);}catch(e){}}
+const COUNTDOWN=10;
 // ---------------- the run
 let running=false,abort=false,phaseA=false,previewOn=false,wledSaved=null;
 async function espBottom(){try{const s=await espGet('/ambi/api/state');const leds=(s.output&&s.output.leds)||[];
@@ -309,7 +315,12 @@ async function endPreview(){if(!previewOn)return;try{await unlock();await ambiPo
 async function putBack(){mm(undefined,t('restore'));await restoreStrip();await endPreview();}
 async function run(){
   running=true;abort=false;setGo('stop');$('dl').disabled=$('cp').disabled=true;$('sum').innerHTML='';$('runRes').textContent='';
-  data.A=[];data.B=[];data.C=[];data.notes=[];data.started=new Date().toISOString();data.boxes=JSON.parse(JSON.stringify(box));
+  data.A=[];data.B=[];data.C=[];data.notes=[];data.boxes=JSON.parse(JSON.stringify(box));
+  beep(660,60);  // also unlocks the audio on this tap
+  for(let n=COUNTDOWN;n>0&&!abort;n--){$('mmCount').textContent=n;$('mmCount').style.display='block';mm('',t('cd').replace('%s',n),0);if(n<=3)beep(660,110);await wait(1000);}
+  $('mmCount').style.display='none';
+  if(abort){mm('',t('stopped'));setGo('start');running=false;return;}
+  beep(990,260);data.started=new Date().toISOString();
   try{
     await phaseTv('C',t('phC'),0,0.4);
     if(!abort){await previewDark();await phaseTv('B',t('phB'),0.4,0.8);}
@@ -317,7 +328,7 @@ async function run(){
     if(!abort){await wait(1200);await phaseStrip(0.8,1);}
     const a=track.getSettings();data.camera_end={exposureTime:a.exposureTime,iso:a.iso,colorTemperature:a.colorTemperature};
     if(abort){mm('',t('stopped'));setGo('start');}
-    else{mm('',t('done'),1);setGo('done');summary();}
+    else{mm('',t('done'),1);setGo('done');summary();beep(880,150);setTimeout(()=>beep(1175,220),220);}
   }catch(e){data.notes.push('error: '+e);await putBack();mm('','✗ '+e+' · '+t('stopped'));setGo('start');}
   running=false;$('dl').disabled=$('cp').disabled=false;$('runRes').textContent=abort?t('stopped'):'';}
 async function stopRun(){abort=true;setGo('busy');await putBack();}
