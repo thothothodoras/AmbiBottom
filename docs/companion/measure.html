@@ -1,0 +1,279 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>AmbiBottom Companion – colour measurement</title>
+<link rel="icon" href="data:,">
+<!-- Measurement prototype (calibration plan step 1, docs: CALIBRATION-PLAN): measures, changes NOTHING for good.
+     A: the strip's own colours on the wall (service stopped for ~1 min, WLED solid colours, then everything put back);
+     B: what the TV shows at the side for 11 frame patterns (our strip dark = a brightness-0 PREVIEW, not saved);
+     C: the same with the strip as it is now ("before").  Output: a JSON file to fit the colour matrix offline.
+     Nothing leaves the browser except requests to the user's ESP and TV; the PIN stays in memory only. -->
+<style>
+:root{--bg:#0f1416;--panel:#172024;--panel2:#1e2a2f;--line:#2b3a40;--text:#e6eef0;--muted:#8fa3a8;--acc:#4dbda7;--acc2:#70d8cc;--warn:#e0b040;--bad:#e06a5a;--ok:#5ccf8a}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+header{border-bottom:1px solid var(--line);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px}
+header h1{font-size:16px;margin:0;letter-spacing:.06em;flex:1 1 auto;min-width:0}.lang{flex:none}header h1 em{color:var(--acc);font-style:normal}
+main{max-width:640px;margin:0 auto;padding:16px}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin:0 0 14px}
+.card h2{margin:0 0 4px;font-size:17px}.card p{margin:0 0 10px;color:var(--muted);font-size:14px}
+.btn{border:1px solid var(--line);background:var(--panel2);color:var(--text);border-radius:10px;padding:10px 14px;font:inherit;font-weight:600;cursor:pointer}
+.btn.pri{background:var(--acc);border-color:var(--acc);color:#06221d}.btn.bad{border-color:var(--bad);color:var(--bad)}
+.btn:disabled{opacity:.45;cursor:default}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+input[type=text],input[type=password]{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:10px 12px;font:inherit}
+.res{margin-top:10px;font-size:14px;white-space:pre-wrap;word-break:break-word}
+.ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.mut{color:var(--muted)}
+.camwrap{position:relative;margin-top:10px;display:none;touch-action:none}
+.camwrap video{width:100%;display:block;border-radius:10px;background:#000}
+.camwrap canvas{position:absolute;inset:0;width:100%;height:100%}
+.boxes{font-size:13px;margin-top:8px;display:grid;grid-template-columns:auto 1fr;gap:2px 10px}
+.prog{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:10px 0 4px}.prog b{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2))}
+table{border-collapse:collapse;font-size:13px;margin-top:8px;width:100%}td,th{padding:3px 6px;border-top:1px solid var(--line);text-align:left}th{color:var(--muted);font-weight:500}
+.sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:4px;border:1px solid rgba(255,255,255,.2)}
+.lang{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}.lang button{border:0;background:none;color:var(--muted);padding:4px 10px;font:inherit;font-size:12px;cursor:pointer}.lang button.on{background:var(--acc);color:#06221d}
+google-cast-launcher{display:inline-block;width:40px;height:40px;cursor:pointer;--connected-color:var(--acc2);--disconnected-color:var(--text)}
+footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 16px 24px}
+ol{margin:6px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
+</style>
+</head>
+<body>
+<header><h1>AMBI<em>BOTTOM</em> · <span data-t="title"></span> <span class="mut" id="pv" style="font-weight:400;font-size:12px"></span></h1>
+  <div class="lang"><button id="lEn">EN</button><button id="lEl">ΕΛ</button></div></header>
+<main>
+  <div class="card"><p data-t="intro"></p><ol><li data-t="i1"></li><li data-t="i2"></li><li data-t="i3"></li></ol></div>
+
+  <div class="card">
+    <h2>1 · <span data-t="conT"></span></h2>
+    <p data-t="conP"></p>
+    <div class="row"><input type="text" id="addr" autocomplete="off" spellcheck="false" inputmode="url"></div>
+    <div class="row" style="margin-top:8px"><input type="password" id="pin" autocomplete="off" inputmode="numeric"><button class="btn pri" id="conGo" data-t="conGo"></button></div>
+    <div class="res" id="conRes"></div>
+  </div>
+
+  <div class="card">
+    <h2>2 · <span data-t="castT"></span></h2>
+    <p data-t="castP"></p>
+    <div class="row"><google-cast-launcher id="castBtn" hidden></google-cast-launcher><span class="res" id="castRes" style="margin:0"></span></div>
+  </div>
+
+  <div class="card">
+    <h2>3 · <span data-t="camT"></span></h2>
+    <p data-t="camP"></p>
+    <div class="row"><button class="btn pri" id="camGo" data-t="camGo"></button><button class="btn" id="camWhite" data-t="camWhite" disabled></button><button class="btn" id="camLock" data-t="camLock" disabled></button></div>
+    <div class="row" style="margin-top:8px"><button class="btn" id="expDn" data-t="expDn" disabled></button><button class="btn" id="expUp" data-t="expUp" disabled></button></div>
+    <div class="camwrap" id="camwrap"><video id="vid" playsinline muted></video><canvas id="ov"></canvas></div>
+    <canvas id="cv" style="display:none"></canvas>
+    <div class="boxes" id="boxes"></div>
+    <div class="res" id="camRes"></div>
+  </div>
+
+  <div class="card">
+    <h2>4 · <span data-t="runT"></span></h2>
+    <p data-t="runP"></p>
+    <div class="row"><button class="btn pri" id="runGo" data-t="runGo"></button><button class="btn bad" id="runStop" data-t="runStop" disabled></button></div>
+    <div class="prog"><b id="bar"></b></div>
+    <div class="res" id="runRes"></div>
+    <div id="sum"></div>
+    <div class="row" style="margin-top:10px"><button class="btn" id="dl" data-t="dl" disabled></button><button class="btn" id="cp" data-t="cp" disabled></button></div>
+  </div>
+</main>
+<footer><span data-t="foot"></span> · <span id="fv"></span></footer>
+<script>
+const PAGE_VERSION='0.2';
+const T={
+ en:{title:'colour measurement',intro:'Measurement only: it finds out how your strip and your TV really look on your wall, so the colour correction can be computed. Nothing is changed for good; at the end everything is as before.',
+  i1:'Strip: about 1 minute the strip shows its own red, green, blue (the TV picture is black).',i2:'TV: 11 colours on the TV, the strip dark (a preview, not saved).',i3:'Before: the same 11 colours with the strip as it is now.',
+  conT:'Connect',conP:'ESP address and settings PIN (the PIN stays in this page\'s memory only, it is never stored).',conGo:'Connect',
+  castT:'Cast to the TV',castP:'Press the Cast icon and pick the TV.',
+  camT:'Camera',camP:'Phone still (leaning on something). Drag the two boxes: S onto the side glow on the wall, B onto the bottom glow, both a little away from the screen. Then «TV white» and «Lock».',
+  camGo:'Start camera',camWhite:'TV white (to lock)',camLock:'Lock exposure + WB',expDn:'Darker',expUp:'Brighter',
+  runT:'Measure (~5 min)',runP:'Do not move the phone. The TV and the strip change by themselves. Stop puts everything back.',runGo:'Start measurement',runStop:'Stop',
+  dl:'Download data',cp:'Copy data',foot:'AmbiBottom companion · measurement prototype · nothing leaves your browser',
+  need:'First: 1 connected, 2 Cast connected, 3 camera locked.',okCon:'Connected: ',badPin:'PIN not accepted (or wrong).',noPin:'No PIN set on the device: writes are open.',
+  phA:'A · strip colours',phB:'B · TV colours (strip dark)',phC:'C · before (strip as now)',restore:'Putting everything back…',done:'Done. Download or copy the data and send it.',stopped:'Stopped, everything put back.',
+  clip:'clipped',locked:'Locked: ',noLock:'No manual exposure / WB on this camera.',lockFirst:'Lock first.',copied:'Copied.',
+  sumT:'Before (C): side vs bottom, colour difference (smaller = better)',col:'Colour',diff:'Δ',bri:'bottom / side'},
+ el:{title:'μέτρηση χρώματος',intro:'Μόνο μέτρηση: βρίσκει πώς φαίνονται πραγματικά η ταινία σου και η TV σου στον τοίχο, για να υπολογιστεί η διόρθωση χρώματος. Δεν αλλάζει τίποτα μόνιμα· στο τέλος όλα είναι όπως πριν.',
+  i1:'Ταινία: για περίπου 1 λεπτό η ταινία δείχνει το δικό της κόκκινο, πράσινο, μπλε (η TV μαύρη).',i2:'TV: 11 χρώματα στην TV, η ταινία σβηστή (προεπισκόπηση, δεν αποθηκεύεται).',i3:'Πριν: τα ίδια 11 χρώματα με την ταινία όπως είναι τώρα.',
+  conT:'Σύνδεση',conP:'Διεύθυνση του ESP και PIN ρυθμίσεων (το PIN μένει μόνο στη μνήμη της σελίδας, δεν αποθηκεύεται πουθενά).',conGo:'Σύνδεση',
+  castT:'Cast στην TV',castP:'Πάτα το εικονίδιο Cast και διάλεξε την TV.',
+  camT:'Κάμερα',camP:'Κινητό ακίνητο (ακουμπισμένο κάπου). Σύρε τα δύο κουτάκια: το S στη λάμψη του πλαγίου στον τοίχο, το B στη λάμψη από κάτω, και τα δύο λίγο μακριά από την οθόνη. Μετά «TV λευκή» και «Κλείδωμα».',
+  camGo:'Άνοιγμα κάμερας',camWhite:'TV λευκή (για κλείδωμα)',camLock:'Κλείδωμα έκθεσης + WB',expDn:'Πιο σκοτεινά',expUp:'Πιο φωτεινά',
+  runT:'Μέτρηση (~5 λεπτά)',runP:'Μην κουνάς το κινητό. Η TV και η ταινία αλλάζουν μόνες τους. Το «Διακοπή» τα επαναφέρει όλα.',runGo:'Έναρξη μέτρησης',runStop:'Διακοπή',
+  dl:'Λήψη δεδομένων',cp:'Αντιγραφή δεδομένων',foot:'AmbiBottom companion · πρωτότυπο μέτρησης · κανένα δεδομένο δεν φεύγει από τον browser',
+  need:'Πρώτα: 1 σύνδεση, 2 Cast συνδεδεμένο, 3 κάμερα κλειδωμένη.',okCon:'Συνδέθηκε: ',badPin:'Το PIN δεν έγινε δεκτό (ή είναι λάθος).',noPin:'Η συσκευή δεν έχει PIN: οι αλλαγές είναι ανοιχτές.',
+  phA:'A · χρώματα ταινίας',phB:'B · χρώματα TV (ταινία σβηστή)',phC:'C · πριν (ταινία όπως τώρα)',restore:'Επαναφορά όλων…',done:'Τέλος. Κατέβασε ή αντίγραψε τα δεδομένα και στείλ\' τα.',stopped:'Διακόπηκε, όλα επανήλθαν.',
+  clip:'καμένα',locked:'Κλειδώθηκε: ',noLock:'Η κάμερα δεν δίνει χειροκίνητη έκθεση / WB.',lockFirst:'Πρώτα κλείδωμα.',copied:'Αντιγράφηκε.',
+  sumT:'Πριν (C): πλάι vs κάτω, διαφορά χρώματος (μικρότερο = καλύτερα)',col:'Χρώμα',diff:'Δ',bri:'κάτω / πλάι'}};
+const $=id=>document.getElementById(id);
+const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
+let L=store.get('ab_lang')||((navigator.language||'').toLowerCase().startsWith('el')?'el':'en');
+const t=k=>T[L][k]||k;
+function lang(l){L=l;store.set('ab_lang',l);document.documentElement.lang=l;document.querySelectorAll('[data-t]').forEach(e=>e.textContent=t(e.dataset.t));
+  $('lEn').className=l==='en'?'on':'';$('lEl').className=l==='el'?'on':'';$('addr').placeholder=l==='el'?'IP του ESP':'ESP IP address';$('pin').placeholder='PIN';}
+$('lEn').onclick=()=>lang('en');$('lEl').onclick=()=>lang('el');
+$('pv').textContent=$('fv').textContent='v'+PAGE_VERSION;
+const wait=ms=>new Promise(r=>setTimeout(r,ms));
+const COLS=[['white','#fff'],['grey50','#808080'],['red','#f00'],['green','#0f0'],['blue','#00f'],['yellow','#ff0'],['cyan','#0ff'],['magenta','#f0f'],['orange','#ff8000'],['skin','#e9b48f'],['purple','#8a4fd0']];
+const HOLDOUT=['skin','purple'];
+// measure.mp4: colour k is fully shown from 8k+3 (k=0: 0) to 8k+10 s; we measure 5.5 .. 9 s into each
+const VT={len:93,win:k=>[8*k+5.5,8*k+9]};
+const data={page:'measure',page_version:PAGE_VERSION,ua:navigator.userAgent,started:null,camera:null,boxes:null,saved_strip:null,A:[],B:[],C:[],notes:[]};
+
+// ---------------- 1. ESP
+let ESP=null,saved=null;
+$('addr').value=store.get('ab_addr')||'';
+$('addr').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('pin').focus();}});
+$('pin').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('conGo').click();}});
+const espGet=p=>fetch(ESP+p,{cache:'no-store',targetAddressSpace:'local'}).then(r=>{if(!r.ok)throw new Error('http '+r.status);return r.json();});
+// our /ambi/api: text/plain = a CORS "simple" request (the ESP does not answer OPTIONS there yet)
+const ambiPost=(p,o)=>fetch(ESP+'/ambi/api'+p,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(o),targetAddressSpace:'local'}).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error((j.error||('http '+r.status)));return j;});
+// WLED's /json answers OPTIONS, so a JSON POST is fine
+const wledPost=o=>fetch(ESP+'/json/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o),targetAddressSpace:'local'}).then(r=>{if(!r.ok)throw new Error('wled http '+r.status);return r.json();});
+let pinMem='';
+async function unlock(){if(pinMem)await wledPost({pin:pinMem}).catch(()=>{});}
+$('conGo').onclick=async()=>{
+  const a=$('addr').value.trim().replace(/^https?:\/\//,'').replace(/\/.*$/,'');if(!a)return;store.set('ab_addr',a);ESP='http://'+a;
+  pinMem=$('pin').value.trim();$('pin').value='';
+  const out=$('conRes');out.className='res mut';out.textContent='…';
+  try{
+    const st=await espGet('/ambi/api/state');await unlock();
+    const ss=await espGet('/ambi/api/settings/strip');const s=ss.preview&&ss.saved?ss.saved:ss.settings;
+    saved={wb_r:s.wb_r,wb_g:s.wb_g,wb_b:s.wb_b,brightness:s.brightness};data.saved_strip={...saved,wb_keep_pure:ss.settings.wb_keep_pure};
+    // a harmless write: the same values as a preview -> 200 = writes allowed
+    await ambiPost('/settings/strip',{preview:true,...saved});
+    await ambiPost('/settings/strip',{...saved});  // and end it at once (same values; the device stays as it was)
+    out.className='res ok';out.textContent=t('okCon')+st.bridge_version+' · wb '+saved.wb_r+' / '+saved.wb_g+' / '+saved.wb_b+' · bri '+saved.brightness;
+    data.esp_version=st.bridge_version;
+  }catch(e){ESP=ESP;out.className='res bad';out.textContent=(/pin_required|401/.test(String(e))?t('badPin'):'✗ '+e);saved=null;}};
+
+// ---------------- 2. Cast
+let castOk=false;
+const sess=()=>castOk&&cast.framework.CastContext.getInstance().getCurrentSession();
+window.__onGCastApiAvailable=ok=>{if(!ok){$('castRes').textContent='Cast ✗';return;}castOk=true;const c=cast.framework.CastContext.getInstance();
+  c.setOptions({receiverApplicationId:chrome.cast.media.DEFAULT_MEDIA_RECEIVER_APP_ID,autoJoinPolicy:chrome.cast.AutoJoinPolicy.ORIGIN_SCOPED});$('castBtn').hidden=false;
+  c.addEventListener(cast.framework.CastContextEventType.SESSION_STATE_CHANGED,()=>{const s=c.getCurrentSession();$('castRes').textContent=s?'✓ '+s.getCastDevice().friendlyName:'';});};
+{const cs=document.createElement('script');cs.src='https://www.gstatic.com/cv/js/sender/v1/cast_sender.js?loadCastFramework=1';cs.async=true;document.head.appendChild(cs);}
+function castImage(f){const mi=new chrome.cast.media.MediaInfo(new URL('patterns/'+f,location.href).href,'image/png');return sess().loadMedia(new chrome.cast.media.LoadRequest(mi));}
+function castVideo(f){const mi=new chrome.cast.media.MediaInfo(new URL('patterns/'+f,location.href).href,'video/mp4');mi.streamType=chrome.cast.media.StreamType.BUFFERED;return sess().loadMedia(new chrome.cast.media.LoadRequest(mi));}
+
+// ---------------- 3. camera + two boxes
+let track=null,locked=false;
+const box={S:{x:.08,y:.35,w:.12,h:.16},B:{x:.44,y:.80,w:.12,h:.12}};
+const lin=v=>{v/=255;return v<=0.04045?v/12.92:Math.pow((v+0.055)/1.055,2.4);};
+let live={S:null,B:null};
+$('camGo').onclick=async()=>{
+  try{const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280}},audio:false});
+    track=st.getVideoTracks()[0];const v=$('vid');v.srcObject=st;$('camwrap').style.display='block';await v.play();
+    $('camLock').disabled=false;$('camWhite').disabled=false;loop();
+  }catch(e){$('camRes').className='res bad';$('camRes').textContent='✗ '+e;}};
+$('camWhite').onclick=()=>{if(sess())castImage('frame_white.png').catch(e=>$('camRes').textContent='✗ '+e);};
+async function lockCam(){
+  const c=track.getCapabilities?track.getCapabilities():{},s=track.getSettings(),adv={};
+  if(c.exposureMode&&c.exposureMode.includes('manual')){adv.exposureMode='manual';if(s.exposureTime)adv.exposureTime=s.exposureTime;if(s.iso)adv.iso=s.iso;}
+  if(c.whiteBalanceMode&&c.whiteBalanceMode.includes('manual')){adv.whiteBalanceMode='manual';const ct=c.colorTemperature||{};let k=s.colorTemperature>0?s.colorTemperature:5000;if(ct.min!==undefined)k=Math.max(ct.min,Math.min(ct.max,k));if(ct.step)k=Math.round(k/ct.step)*ct.step;adv.colorTemperature=k;}
+  if(c.focusMode&&c.focusMode.includes('manual'))adv.focusMode='manual';
+  if(!adv.exposureMode&&!adv.whiteBalanceMode){$('camRes').className='res warn';$('camRes').textContent=t('noLock');return;}
+  await track.applyConstraints({advanced:[adv]});locked=true;showLock();$('expDn').disabled=$('expUp').disabled=false;}
+function showLock(){const a=track.getSettings();data.camera={label:track.label,exposureTime:a.exposureTime,iso:a.iso,colorTemperature:a.colorTemperature,exposureMode:a.exposureMode,whiteBalanceMode:a.whiteBalanceMode};
+  $('camRes').className='res ok';$('camRes').textContent=t('locked')+'exp '+a.exposureTime+' · ISO '+a.iso+' · '+a.colorTemperature+' K';}
+$('camLock').onclick=()=>lockCam().catch(e=>{$('camRes').className='res bad';$('camRes').textContent='✗ '+e;});
+async function expScale(f){if(!locked){$('camRes').textContent=t('lockFirst');return;}const c=track.getCapabilities(),s=track.getSettings(),et=c.exposureTime||{};
+  let v=s.exposureTime*f;if(et.min!==undefined)v=Math.max(et.min,Math.min(et.max,v));await track.applyConstraints({advanced:[{exposureMode:'manual',exposureTime:v}]});showLock();}
+$('expDn').onclick=()=>expScale(0.7).catch(e=>$('camRes').textContent='✗ '+e);
+$('expUp').onclick=()=>expScale(1.4).catch(e=>$('camRes').textContent='✗ '+e);
+// dragging: the nearest box follows the finger
+const ov=$('ov');let drag=null;
+function rel(e){const r=ov.getBoundingClientRect();return [(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height];}
+ov.addEventListener('pointerdown',e=>{const [x,y]=rel(e);let best=null,bd=9;for(const k in box){const b=box[k],d=Math.hypot(x-(b.x+b.w/2),y-(b.y+b.h/2));if(d<bd){bd=d;best=k;}}drag=best;ov.setPointerCapture(e.pointerId);move(e);});
+ov.addEventListener('pointermove',e=>{if(drag)move(e);});
+ov.addEventListener('pointerup',()=>{drag=null;});
+function move(e){if(running)return;const [x,y]=rel(e),b=box[drag];b.x=Math.max(0,Math.min(1-b.w,x-b.w/2));b.y=Math.max(0,Math.min(1-b.h,y-b.h/2));}
+function meanBox(d,W,H,b){const x0=Math.round(b.x*W),y0=Math.round(b.y*H),w=Math.max(1,Math.round(b.w*W)),h=Math.max(1,Math.round(b.h*H));
+  let r=0,g=0,bl=0,n=0,cl=0;for(let y=y0;y<y0+h;y++)for(let x=x0;x<x0+w;x++){const i=(y*W+x)*4;if(d[i]>=250||d[i+1]>=250||d[i+2]>=250){cl++;continue;}r+=lin(d[i]);g+=lin(d[i+1]);bl+=lin(d[i+2]);n++;}
+  return n?{m:[r/n,g/n,bl/n],clip:cl/(n+cl)}:{m:null,clip:1};}
+let collect=null;
+function loop(){
+  const v=$('vid');if(!track||track.readyState!=='live')return;
+  const W=320,H=Math.round(320*v.videoHeight/Math.max(1,v.videoWidth)),cv=$('cv');cv.width=W;cv.height=H;const x=cv.getContext('2d',{willReadFrequently:true});x.drawImage(v,0,0,W,H);
+  const d=x.getImageData(0,0,W,H).data;live.S=meanBox(d,W,H,box.S);live.B=meanBox(d,W,H,box.B);
+  if(collect)collect.push({t:performance.now(),S:live.S,B:live.B});
+  ov.width=ov.clientWidth;ov.height=ov.clientHeight;const o=ov.getContext('2d');o.clearRect(0,0,ov.width,ov.height);o.lineWidth=2;o.font='13px system-ui';
+  for(const k in box){const b=box[k];o.strokeStyle=k==='S'?'#70d8cc':'#e0b040';o.setLineDash([6,4]);o.strokeRect(b.x*ov.width,b.y*ov.height,b.w*ov.width,b.h*ov.height);o.fillStyle=o.strokeStyle;o.fillText(k,b.x*ov.width+4,b.y*ov.height+14);}
+  const f=s=>s&&s.m?s.m.map(v=>v.toFixed(3)).join(' / ')+(s.clip>0.01?' · '+t('clip')+' '+Math.round(s.clip*100)+' %':''):'–';
+  $('boxes').innerHTML='<span style="color:#70d8cc">S</span><span>'+f(live.S)+'</span><span style="color:#e0b040">B</span><span>'+f(live.B)+'</span>';
+  setTimeout(loop,200);}
+function avg(rows,key){const xs=rows.map(r=>r[key]).filter(s=>s&&s.m);if(!xs.length)return null;
+  return {m:[0,1,2].map(i=>+(xs.reduce((a,s)=>a+s.m[i],0)/xs.length).toFixed(5)),clip:+(xs.reduce((a,s)=>a+s.clip,0)/xs.length).toFixed(3),n:xs.length,
+    sd:[0,1,2].map(i=>{const mu=xs.reduce((a,s)=>a+s.m[i],0)/xs.length;return +(Math.sqrt(xs.reduce((a,s)=>a+(s.m[i]-mu)**2,0)/xs.length)/(mu||1)).toFixed(4);})};}
+
+// ---------------- 4. the run
+let running=false,abort=false,phaseA=false,previewOn=false,wledSaved=null;
+const step=(p,txt)=>{$('bar').style.width=Math.round(p*100)+'%';$('runRes').className='res mut';$('runRes').textContent=txt;};
+async function espBottom(){try{const s=await espGet('/ambi/api/state');const leds=(s.output&&s.output.leds)||[];
+  const ml=leds.length?[0,1,2].map(i=>leds.reduce((a,c)=>a+c[i],0)/leds.length):null;
+  return {lamps:(s.bottom||[]).map(l=>({xy:l.xy,bri8:l.bri8,rgb:l.rgb})),leds_mean:ml&&ml.map(v=>+v.toFixed(1)),ma:s.output&&s.output.estimated_ma};}catch(e){return {error:String(e)};}}
+async function holdMeasure(ms){collect=[];await wait(ms);const rows=collect;collect=null;return {S:avg(rows,'S'),B:avg(rows,'B')};}
+async function phaseStrip(){
+  phaseA=true;step(0.02,t('phA'));
+  await castImage('black.png');await wait(4000);
+  wledSaved=await espGet('/json/state');
+  await unlock();await ambiPost('/service',{action:'stop'});await wait(2500);
+  const seq=[['off',0,0,0],['r96',96,0,0],['g96',0,96,0],['b96',0,0,96],['w96',96,96,96],['r192',192,0,0],['g192',0,192,0],['b192',0,0,192],['off2',0,0,0]];
+  for(let i=0;i<seq.length&&!abort;i++){const [n,r,g,b]=seq[i];step(0.02+0.2*i/seq.length,t('phA')+' · '+n);
+    await wledPost({on:true,bri:255,transition:0,seg:[{id:0,fx:0,col:[[r,g,b]]}]});await wait(2500);
+    const m=await holdMeasure(2000);data.A.push({name:n,pwm:[r,g,b],...m});}
+  await restoreStrip();}
+async function restoreStrip(){
+  if(!phaseA)return;
+  try{if(wledSaved){const s0=(wledSaved.seg||[])[0]||{};await wledPost({on:wledSaved.on,bri:wledSaved.bri,transition:7,seg:[{id:0,fx:s0.fx,col:s0.col}]});}}catch(e){data.notes.push('wled restore: '+e);}
+  try{await unlock();await ambiPost('/service',{action:'start'});}catch(e){data.notes.push('service start: '+e);}
+  phaseA=false;await wait(3000);}
+async function phaseTv(key,label,p0,p1){
+  await castVideo('measure.mp4');const t0=performance.now();
+  const player=new cast.framework.RemotePlayer(),ctl=new cast.framework.RemotePlayerController(player);let vt=null,vtAt=0;
+  const onT=()=>{vt=player.currentTime;vtAt=performance.now();};ctl.addEventListener(cast.framework.RemotePlayerEventType.CURRENT_TIME_CHANGED,onT);
+  const now=()=>vt!==null&&vt>0?vt+(performance.now()-vtAt)/1000:(performance.now()-t0)/1000;
+  for(let k=0;k<COLS.length&&!abort;k++){const [a,b]=VT.win(k);
+    while(now()<a&&!abort)await wait(100);
+    step(p0+(p1-p0)*k/COLS.length,label+' · '+COLS[k][0]);
+    collect=[];const esp=[];while(now()<b&&!abort){esp.push(await espBottom());await wait(400);}
+    const rows=collect;collect=null;
+    data[key].push({name:COLS[k][0],holdout:HOLDOUT.includes(COLS[k][0]),S:avg(rows,'S'),B:avg(rows,'B'),esp,clock:vt!==null?'cast':'local'});}
+  try{ctl.removeEventListener(cast.framework.RemotePlayerEventType.CURRENT_TIME_CHANGED,onT);}catch(e){}}
+async function previewDark(){await unlock();await ambiPost('/settings/strip',{preview:true,...saved,brightness:0});previewOn=true;}
+async function endPreview(){if(!previewOn)return;try{await unlock();await ambiPost('/settings/strip',{...saved});}catch(e){data.notes.push('end preview: '+e);}previewOn=false;}
+async function putBack(){$('runRes').textContent=t('restore');await restoreStrip();await endPreview();}
+$('runGo').onclick=async()=>{
+  if(!saved||!sess()||!locked){$('runRes').className='res warn';$('runRes').textContent=t('need');return;}
+  running=true;abort=false;$('runGo').disabled=true;$('runStop').disabled=false;$('dl').disabled=$('cp').disabled=true;$('sum').innerHTML='';
+  data.A=[];data.B=[];data.C=[];data.notes=[];data.started=new Date().toISOString();data.boxes=JSON.parse(JSON.stringify(box));showLock();
+  try{
+    await phaseStrip();
+    if(!abort){await previewDark();await phaseTv('B',t('phB'),0.25,0.62);}
+    await endPreview();
+    if(!abort){await wait(1500);await phaseTv('C',t('phC'),0.62,1);}
+    data.camera_end=track.getSettings&&{exposureTime:track.getSettings().exposureTime,iso:track.getSettings().iso,colorTemperature:track.getSettings().colorTemperature};
+    if(abort){$('runRes').className='res warn';$('runRes').textContent=t('stopped');}
+    else{step(1,'');$('runRes').className='res ok';$('runRes').textContent=t('done');summary();}
+  }catch(e){data.notes.push('error: '+e);await putBack();$('runRes').className='res bad';$('runRes').textContent='✗ '+e+'\n'+t('stopped');}
+  running=false;$('runGo').disabled=false;$('runStop').disabled=true;$('dl').disabled=$('cp').disabled=false;};
+$('runStop').onclick=async()=>{abort=true;$('runStop').disabled=true;await putBack();};
+window.addEventListener('pagehide',()=>{if(!ESP)return;const b=(p,o)=>{try{navigator.sendBeacon(ESP+'/ambi/api'+p,JSON.stringify(o));}catch(e){}};
+  if(phaseA)b('/service',{action:'start'});if(previewOn&&saved)b('/settings/strip',{...saved});});
+function chroma(m){const s=m[0]+m[1]+m[2]||1;return [m[0]/s,m[1]/s];}
+function summary(){
+  let h='<p class="mut" style="margin:10px 0 0">'+t('sumT')+'</p><table><tr><th>'+t('col')+'</th><th>'+t('diff')+'</th><th>'+t('bri')+'</th></tr>';
+  data.C.forEach((r,i)=>{if(!r.S||!r.B)return;const a=chroma(r.S.m),b=chroma(r.B.m),d=Math.hypot(a[0]-b[0],a[1]-b[1])*100;
+    const ys=0.2126*r.S.m[0]+0.7152*r.S.m[1]+0.0722*r.S.m[2],yb=0.2126*r.B.m[0]+0.7152*r.B.m[1]+0.0722*r.B.m[2];
+    h+='<tr><td><span class="sw" style="background:'+COLS[i][1]+'"></span>'+r.name+(r.holdout?' *':'')+'</td><td class="'+(d<2?'ok':d<5?'warn':'bad')+'">'+d.toFixed(1)+'</td><td>'+(ys>0?Math.round(100*yb/ys)+' %':'–')+'</td></tr>';});
+  $('sum').innerHTML=h+'</table>';}
+$('dl').onclick=()=>{const b=new Blob([JSON.stringify(data,null,1)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='ambibottom-measure-'+(data.started||'').replace(/[:.]/g,'-')+'.json';a.click();};
+$('cp').onclick=async()=>{try{await navigator.clipboard.writeText(JSON.stringify(data));$('runRes').textContent=t('copied');}catch(e){$('runRes').textContent='✗ '+e;}};
+lang(L);
+</script>
+</body>
+</html>
