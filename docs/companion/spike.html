@@ -59,6 +59,8 @@ footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 16px 24px
     <h2>3 · <span data-t="camT"></span></h2>
     <p data-t="camP"></p>
     <div class="row"><button class="btn pri" id="camGo" data-t="camStart"></button><button class="btn" id="camLock" data-t="camLock" disabled></button></div>
+    <div class="row" style="margin-top:8px"><button class="btn" id="autoGo" data-t="autoGo"></button></div>
+    <div class="res" id="autoRes"></div>
     <video id="vid" playsinline muted></video><canvas id="cv"></canvas>
     <div class="res" id="camStab"></div>
     <table id="camCaps"></table>
@@ -79,6 +81,7 @@ const T={
   espT:'Talk to the ESP',espP:'Type the ESP\'s address (IP, e.g. 192.0.2.20). Chrome may ask to allow access to devices on your local network: allow it. Read only, nothing is changed.',test:'Test',
   castT:'Test patterns on the TV (Cast)',castP:'Press the Cast icon, pick the TV, then a colour. The TV downloads the picture from this site.',
   camT:'Camera',camP:'Lock test: aim the middle of the picture at the side glow on the wall, with the TV screen in the picture. Press «Lock», then cast «White» and «White frame, black centre» a few times. The Ambilight stays the same (it reads the edges), only the screen gets darker or brighter. Locked = the spread stays a few %; not locked = the numbers jump.',camStart:'Start camera',camLock:'Lock exposure + white balance',
+  autoGo:'Automatic lock test (~90 s)',autoNeed:'First connect Cast to the TV and start the camera; keep the phone still, the middle of the picture on the side glow.',autoRun:'Running',autoA:'Automatic camera',autoL:'Locked camera',autoCh:'white -> frame:',autoRep:'white repeat',autoDone:'Done. Copy the report below.',
   repT:'Report',repP:'Copy the results and paste them in the chat.',repCopy:'Copy report',foot:'AmbiBottom companion · test page · no data leaves your browser',
   ok:'OK',fail:'Failed',notChrome:'Cast needs Chrome (desktop or Android).',castNo:'Cast not available in this browser.',castReady:'Cast ready: press the icon.',castOn:'Connected to ',castNoSess:'Press the Cast icon first.',sent:'Sent: ',
   mixed:'The browser blocked the request (mixed content / local network access). This browser needs the fallback (open the ESP page in a second window).',
@@ -87,6 +90,7 @@ const T={
   espT:'Σύνδεση με το ESP',espP:'Γράψε τη διεύθυνση του ESP (IP, π.χ. 192.0.2.20). Το Chrome μπορεί να ρωτήσει αν επιτρέπεις πρόσβαση σε συσκευές του τοπικού δικτύου: πάτα να επιτρέπεται. Μόνο ανάγνωση, δεν αλλάζει τίποτα.',test:'Δοκιμή',
   castT:'Μοτίβα στην TV (Cast)',castP:'Πάτα το εικονίδιο Cast, διάλεξε την TV, μετά ένα χρώμα. Η TV κατεβάζει την εικόνα από αυτό το site.',
   camT:'Κάμερα',camP:'Δοκιμή κλειδώματος: στρέψε τη μέση του κάδρου στη λάμψη του πλαγίου στον τοίχο, να φαίνεται και η οθόνη της TV. Πάτα «Κλείδωμα» και μετά κάνε cast «Λευκό» και «Λευκό πλαίσιο, μαύρη μέση» μερικές φορές. Το Ambilight μένει ίδιο (διαβάζει τις άκρες), αλλάζει μόνο πόσο φωτίζει η οθόνη. Κλειδωμένο = η διακύμανση μένει λίγα %· ξεκλείδωτο = τα νούμερα πηδάνε.',camStart:'Άνοιγμα κάμερας',camLock:'Κλείδωμα έκθεσης + white balance',
+  autoGo:'Αυτόματη δοκιμή κλειδώματος (~90 s)',autoNeed:'Πρώτα σύνδεσε το Cast με την TV και άνοιξε την κάμερα· κινητό ακίνητο, η μέση του κάδρου στη λάμψη του πλαγίου.',autoRun:'Τρέχει',autoA:'Κάμερα σε αυτόματο',autoL:'Κάμερα κλειδωμένη',autoCh:'λευκό -> πλαίσιο:',autoRep:'επανάληψη λευκού',autoDone:'Τέλος. Αντίγραψε την αναφορά παρακάτω.',
   repT:'Αναφορά',repP:'Αντίγραψε τα αποτελέσματα και επικόλλησέ τα στη συζήτηση.',repCopy:'Αντιγραφή αναφοράς',foot:'AmbiBottom companion · δοκιμαστική σελίδα · κανένα δεδομένο δεν φεύγει από τον browser',
   ok:'OK',fail:'Απέτυχε',notChrome:'Το Cast θέλει Chrome (υπολογιστή ή Android).',castNo:'Το Cast δεν υπάρχει σε αυτόν τον browser.',castReady:'Το Cast είναι έτοιμο: πάτα το εικονίδιο.',castOn:'Συνδέθηκε με ',castNoSess:'Πάτα πρώτα το εικονίδιο Cast.',sent:'Στάλθηκε: ',
   mixed:'Ο browser μπλόκαρε το αίτημα (mixed content / πρόσβαση στο τοπικό δίκτυο). Αυτός ο browser θα χρειαστεί την εναλλακτική λύση (σελίδα του ESP σε δεύτερο παράθυρο).',
@@ -127,13 +131,13 @@ $('espGo').onclick=async()=>{
 let castOk=false;
 function drawPats(){const p=$('pats');p.innerHTML='';PATS.forEach(([f,c,en,el])=>{const b=document.createElement('button');b.innerHTML='<i style="background:'+c+'"></i>'+(L==='el'?el:en);b.onclick=()=>castPat(f);p.appendChild(b);});}
 function castPat(f){
-  if(!castOk){$('castRes').textContent=t('castNo');return;}
-  const s=cast.framework.CastContext.getInstance().getCurrentSession();if(!s){$('castRes').textContent=t('castNoSess');return;}
+  if(!castOk){$('castRes').textContent=t('castNo');return Promise.reject(new Error('no cast'));}
+  const s=cast.framework.CastContext.getInstance().getCurrentSession();if(!s){$('castRes').textContent=t('castNoSess');return Promise.reject(new Error('no session'));}
   const url=new URL('patterns/'+f+'.png',location.href).href;
   const mi=new chrome.cast.media.MediaInfo(url,'image/png');mi.metadata=new chrome.cast.media.PhotoMediaMetadata();mi.metadata.title='AmbiBottom '+f;
   if(report.camera&&report.camera.last){(report.camera.per_cast=report.camera.per_cast||[]).push({next_cast:f,locked:!!report.camera.lock&&!report.camera.lock.error,rgb:report.camera.last.rgb,spread_pct:report.camera.last.spread_pct});}
-  s.loadMedia(new chrome.cast.media.LoadRequest(mi)).then(()=>{hist=[];$('castRes').textContent=t('sent')+f;(report.cast=report.cast||{}).sent=(report.cast.sent||0)+1;},
-    e=>{$('castRes').textContent=t('fail')+': '+e;(report.cast=report.cast||{}).error=String(e);});}
+  return s.loadMedia(new chrome.cast.media.LoadRequest(mi)).then(()=>{hist=[];$('castRes').textContent=t('sent')+f;(report.cast=report.cast||{}).sent=(report.cast.sent||0)+1;},
+    e=>{$('castRes').textContent=t('fail')+': '+e;(report.cast=report.cast||{}).error=String(e);throw e;});}
 window.__onGCastApiAvailable=ok=>{
   report.cast={api:ok};
   if(!ok){$('castRes').textContent=t('castNo');return;}
@@ -158,7 +162,7 @@ $('camGo').onclick=async()=>{
     track=st.getVideoTracks()[0];const v=$('vid');v.srcObject=st;v.style.display='block';await v.play();
     report.camera={label:track.label,caps:showCaps()};$('camLock').disabled=false;sample();
   }catch(e){$('camRes').className='res bad';$('camRes').textContent=t('noCam')+e;report.camera={error:String(e)};}};
-$('camLock').onclick=async()=>{
+async function doLock(){
   const c=track.getCapabilities?track.getCapabilities():{},s=track.getSettings(),adv={};
   if(c.exposureMode&&c.exposureMode.includes('manual')){adv.exposureMode='manual';if(s.exposureTime)adv.exposureTime=s.exposureTime;if(s.iso)adv.iso=s.iso;}
   if(c.whiteBalanceMode&&c.whiteBalanceMode.includes('manual')){adv.whiteBalanceMode='manual';const ct=c.colorTemperature||{};let k=s.colorTemperature>0?s.colorTemperature:5000;if(ct.min!==undefined)k=Math.max(ct.min,Math.min(ct.max,k));if(ct.step)k=Math.round(k/ct.step)*ct.step;adv.colorTemperature=k;}
@@ -166,7 +170,35 @@ $('camLock').onclick=async()=>{
   try{await track.applyConstraints({advanced:[adv]});hist=[];const after=track.getSettings();
     $('camRes').className='res ok';$('camRes').textContent=t('locked')+' '+JSON.stringify(Object.fromEntries(KEYS.filter(k=>after[k]!==undefined).map(k=>[k,after[k]])));
     report.camera.lock={asked:adv,after:Object.fromEntries(KEYS.filter(k=>after[k]!==undefined).map(k=>[k,after[k]]))};showCaps();
-  }catch(e){$('camRes').className='res bad';$('camRes').textContent=t('fail')+': '+e;report.camera.lock={error:String(e)};}};
+  }catch(e){$('camRes').className='res bad';$('camRes').textContent=t('fail')+': '+e;report.camera.lock={error:String(e)};}}
+$('camLock').onclick=()=>doLock();
+$('autoGo').onclick=()=>autoTest();
+// automatic lock test: «White» <-> «White frame, black centre» 3 times, first with the camera on automatic, then locked.
+// The Ambilight (edges) is the same in both pictures; only the screen light changes.
+async function autoTest(){
+  const out=$('autoRes'),btn=$('autoGo');
+  if(!track||track.readyState!=='live'||!castOk||!cast.framework.CastContext.getInstance().getCurrentSession()){out.className='res warn';out.textContent=t('autoNeed');return;}
+  btn.disabled=true;out.className='res mut';
+  const wait=ms=>new Promise(r=>setTimeout(r,ms));
+  const read=()=>{const h=hist.slice(-8);if(!h.length)return null;const m=[0,1,2].map(i=>h.reduce((a,x)=>a+x[i],0)/h.length),S=m[0]+m[1]+m[2]||1,st=track.getSettings();
+    return {Y:+(0.2126*m[0]+0.7152*m[1]+0.0722*m[2]).toFixed(5),r:+(m[0]/S).toFixed(4),b:+(m[2]/S).toFixed(4),et:st.exposureTime,iso:st.iso,ct:st.colorTemperature,em:st.exposureMode};};
+  const res={};let step=0;
+  try{
+    for(const phase of ['auto','locked']){
+      if(phase==='auto'){try{await track.applyConstraints({advanced:[{exposureMode:'continuous',whiteBalanceMode:'continuous'}]});}catch(e){}report.camera.lock=null;}
+      else{await doLock();}
+      const rows=[];
+      for(let i=0;i<3;i++)for(const f of ['white','frame_white']){
+        step++;out.textContent=t('autoRun')+' '+step+'/12 · '+(phase==='auto'?t('autoA'):t('autoL'))+' · '+f;
+        await castPat(f);await wait(7000);rows.push({f,...read()});}
+      const ch=[0,1,2].map(i=>rows[2*i+1].Y/rows[2*i].Y-1),wY=[0,2,4].map(i=>rows[i].Y);
+      res[phase]={rows,change_pct:+(100*ch.reduce((a,v)=>a+v,0)/3).toFixed(1),change_range_pct:+(100*(Math.max(...ch)-Math.min(...ch))).toFixed(1),
+        white_repeat_pct:+(100*(Math.max(...wY)-Math.min(...wY))/(wY.reduce((a,v)=>a+v,0)/3)).toFixed(1)};}
+    report.camera.autotest=res;out.className='res ok';
+    out.textContent=t('autoA')+': '+t('autoCh')+' '+res.auto.change_pct+' % ('+t('autoRep')+' '+res.auto.white_repeat_pct+' %)\n'+
+      t('autoL')+': '+t('autoCh')+' '+res.locked.change_pct+' % ('+t('autoRep')+' '+res.locked.white_repeat_pct+' %)\n'+t('autoDone');
+  }catch(e){out.className='res bad';out.textContent=t('fail')+': '+e;report.camera.autotest={error:String(e),partial:res};}
+  btn.disabled=false;}
 function sample(){
   const v=$('vid'),cv=$('cv');if(!track||track.readyState!=='live')return;
   const w=160,h=Math.round(160*v.videoHeight/Math.max(1,v.videoWidth));cv.width=w;cv.height=h;const x=cv.getContext('2d',{willReadFrequently:true});
