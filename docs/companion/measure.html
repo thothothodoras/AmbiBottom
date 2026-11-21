@@ -47,7 +47,7 @@ ol{margin:6px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
 #mmWrap{position:relative;touch-action:none;line-height:0}
 #mmWrap video{display:block;max-width:100vw;max-height:100%}
 #mmWrap canvas{position:absolute;inset:0;width:100%;height:100%}
-#mmBot{display:flex;gap:10px;align-items:center;padding:10px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom));background:rgba(15,20,22,.92);border-top:1px solid var(--line)}
+#mmBot{display:flex;gap:10px;align-items:center;margin-bottom:8px}
 #mmGo{flex:1;font-size:19px;padding:16px}
 #mmX{flex:none;width:52px;height:52px;padding:0;font-size:22px}
 #mmCount{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:96px;font-weight:800;color:#fff;text-shadow:0 2px 12px #000;display:none;line-height:1}
@@ -91,16 +91,16 @@ ol{margin:6px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
 <footer><span data-t="foot"></span> · <span id="fv"></span></footer>
 
 <div id="mm">
-  <div id="mmTop"><div id="mmPhase"></div><div id="mmMsg"></div><div id="mmVals"></div><div id="mmBar"><b></b></div></div>
+  <div id="mmTop"><div id="mmBot"><button class="btn pri" id="mmGo"></button><button class="btn" id="mmX" aria-label="close">✕</button></div>
+    <div id="mmPhase"></div><div id="mmMsg"></div><div id="mmVals"></div><div id="mmBar"><b></b></div></div>
   <div id="mmStage"><div id="mmWrap"><video id="vid" playsinline muted></video><canvas id="ov"></canvas><div id="mmCount"></div><div id="mmAlert"></div></div></div>
-  <div id="mmBot"><button class="btn" id="mmX" aria-label="close">✕</button><button class="btn pri" id="mmGo"></button></div>
 </div>
 <canvas id="cv" style="display:none"></canvas>
 <script>
-const PAGE_VERSION='0.5';
+const PAGE_VERSION='0.6';
 const T={
  en:{title:'colour measurement',intro:'Measurement only: it finds out how your strip and your TV really look on your wall, so the colour correction can be computed. Nothing is changed for good; at the end everything is as before. About 3 minutes.',
-  i1:'11 colours on the TV, the strip as it is now (1 min).',i2:'The same colours, the strip dark for a while (a preview, not saved) (1 min).',i3:'The TV turns BLACK on purpose for about 30 s and the strip shows its own red, green, blue.',
+  i1:'11 colours on the TV, the strip as it is now (about 1 min).',i2:'The same colours, the strip dark for a while (a preview, not saved) (1 min).',i3:'The TV turns BLACK on purpose for about 30 s and the strip shows its own red, green, blue.',
   conT:'Connect',conP:'ESP address and settings PIN (the PIN stays in this page\'s memory only, it is never stored).',conGo:'Connect',
   castT:'Cast to the TV',castP:'Press the Cast icon and pick the TV.',
   camT:'Measure',camP:'Opens the camera full screen. Best: lean the phone on something (a glass, books) so it does not move; by hand also works, it just measures some colours again. Turn it sideways if the TV fits better.',
@@ -142,8 +142,10 @@ $('pv').textContent=$('fv').textContent='v'+PAGE_VERSION;
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const COLS=[['white','#fff'],['grey50','#808080'],['red','#f00'],['green','#0f0'],['blue','#00f'],['yellow','#ff0'],['cyan','#0ff'],['magenta','#f0f'],['orange','#ff8000'],['skin','#e9b48f'],['purple','#8a4fd0']];
 const HOLDOUT=['skin','purple'];
-// patterns/measure5.mp4 (60 s): colour k fully shown 5k+3 .. 5k+7 s (k=0: 0 .. 7); we measure 5k+4.3 .. 5k+6.8
-const VID={file:'measure5.mp4',win:k=>[5*k+4.3,5*k+6.8],start:k=>5*k+3.1,len:60};
+// patterns/measure6.mp4 (65 s): 5 s of white lead-in (the receiver's playback bar fades, the Ambilight settles),
+// then colour k fully shown 5k+8 .. 5k+12 s (k=0: 0 .. 12); we measure 5k+9.3 .. 5k+11.8.
+// A retake seeks to the PREVIOUS colour, so the playback bar the seek brings up is gone before colour k.
+const VID={file:'measure6.mp4',win:k=>[5*k+9.3,5*k+11.8],seekFor:k=>k>0?5*(k-1)+8.1:0,len:65};
 const data={page:'measure',page_version:PAGE_VERSION,reference:'top (box TV)',ua:navigator.userAgent,started:null,camera:null,boxes:null,saved_strip:null,A:[],B:[],C:[],notes:[]};
 
 // ---------------- 1. ESP
@@ -302,7 +304,7 @@ async function phaseTv(key,label,p0,p1){
   // colours that moved: seek back and measure them once more (keep the steadier one)
   for(const k of redo){if(abort)break;
     mm(undefined,t('again')+COLS[k][0]);
-    const target=VID.start(k);
+    const target=VID.seekFor(k);
     try{player.currentTime=target;ctl.seek();vt=target;vtAt=performance.now();}catch(e){data.notes.push('seek: '+e);break;}
     const [a,b]=VID.win(k);while(now()<a&&!abort)await wait(100);
     const m=await measureUntil(()=>now()>=b,true);const bad=unsteady(m,keys);alertMoved(bad);
