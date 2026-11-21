@@ -2,20 +2,22 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>AmbiBottom Companion – colour measurement</title>
 <link rel="icon" href="data:,">
-<!-- Measurement prototype (calibration plan step 1, docs: CALIBRATION-PLAN): measures, changes NOTHING for good.
-     A: the strip's own colours on the wall (service stopped for ~1 min, WLED solid colours, then everything put back);
-     B: what the TV shows at the side for 11 frame patterns (our strip dark = a brightness-0 PREVIEW, not saved);
-     C: the same with the strip as it is now ("before").  Output: a JSON file to fit the colour matrix offline.
+<!-- Measurement prototype (calibration plan step 1): measures, changes NOTHING for good.
+     v0.4: a one-screen «measurement mode» (full-screen camera, one big button Lock -> Start -> Stop, the lock
+     casts white + darkens by itself until nothing clips, the screen stays awake, phone motion is detected and the
+     colour is measured again), ~3 min: C = 11 colours with the strip as now, B = the same with the strip dark
+     (a brightness-0 PREVIEW, never saved), A = the strip's own R / G / B with the TV black (service stopped
+     ~30 s, WLED solid colours, then everything put back). Output: a JSON file to fit the colour matrix offline.
      Nothing leaves the browser except requests to the user's ESP and TV; the PIN stays in memory only. -->
 <style>
 :root{--bg:#0f1416;--panel:#172024;--panel2:#1e2a2f;--line:#2b3a40;--text:#e6eef0;--muted:#8fa3a8;--acc:#4dbda7;--acc2:#70d8cc;--warn:#e0b040;--bad:#e06a5a;--ok:#5ccf8a}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font:15px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
 header{border-bottom:1px solid var(--line);padding:12px 16px;display:flex;justify-content:space-between;align-items:center;gap:8px}
-header h1{font-size:16px;margin:0;letter-spacing:.06em;flex:1 1 auto;min-width:0}.lang{flex:none}header h1 em{color:var(--acc);font-style:normal}
+header h1{font-size:16px;margin:0;letter-spacing:.06em;flex:1 1 auto;min-width:0}header h1 em{color:var(--acc);font-style:normal}.lang{flex:none}
 main{max-width:640px;margin:0 auto;padding:16px}
 .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px;margin:0 0 14px}
 .card h2{margin:0 0 4px;font-size:17px}.card p{margin:0 0 10px;color:var(--muted);font-size:14px}
@@ -26,17 +28,29 @@ main{max-width:640px;margin:0 auto;padding:16px}
 input[type=text],input[type=password]{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:10px 12px;font:inherit}
 .res{margin-top:10px;font-size:14px;white-space:pre-wrap;word-break:break-word}
 .ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.mut{color:var(--muted)}
-.camwrap{position:relative;margin-top:10px;display:none;touch-action:none}
-.camwrap video{width:100%;display:block;border-radius:10px;background:#000}
-.camwrap canvas{position:absolute;inset:0;width:100%;height:100%}
-.boxes{font-size:13px;margin-top:8px;display:grid;grid-template-columns:auto 1fr;gap:2px 10px}
-.prog{height:8px;background:var(--line);border-radius:4px;overflow:hidden;margin:10px 0 4px}.prog b{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2))}
 table{border-collapse:collapse;font-size:13px;margin-top:8px;width:100%}td,th{padding:3px 6px;border-top:1px solid var(--line);text-align:left}th{color:var(--muted);font-weight:500}
 .sw{display:inline-block;width:12px;height:12px;border-radius:3px;vertical-align:-1px;margin-right:4px;border:1px solid rgba(255,255,255,.2)}
 .lang{display:flex;border:1px solid var(--line);border-radius:999px;overflow:hidden}.lang button{border:0;background:none;color:var(--muted);padding:4px 10px;font:inherit;font-size:12px;cursor:pointer}.lang button.on{background:var(--acc);color:#06221d}
 google-cast-launcher{display:inline-block;width:40px;height:40px;cursor:pointer;--connected-color:var(--acc2);--disconnected-color:var(--text)}
 footer{color:var(--muted);font-size:12px;text-align:center;padding:8px 16px 24px}
 ol{margin:6px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
+.big{width:100%;font-size:18px;padding:16px}
+/* ---- measurement mode: one screen, nothing to scroll */
+#mm{position:fixed;inset:0;z-index:10;background:#000;display:none;flex-direction:column}
+#mm.on{display:flex}
+#mmTop{padding:10px 14px calc(8px) 14px;padding-top:max(10px,env(safe-area-inset-top));background:rgba(15,20,22,.92);border-bottom:1px solid var(--line)}
+#mmPhase{font-size:17px;font-weight:700;color:var(--acc2);min-height:1.3em}
+#mmMsg{font-size:14px;color:var(--text);min-height:1.3em}
+#mmVals{font-size:12px;color:var(--muted);margin-top:2px}
+#mmBar{height:6px;background:var(--line);border-radius:3px;overflow:hidden;margin-top:6px}#mmBar b{display:block;height:100%;width:0;background:linear-gradient(90deg,var(--acc),var(--acc2))}
+#mmStage{flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden}
+#mmWrap{position:relative;touch-action:none;line-height:0}
+#mmWrap video{display:block;max-width:100vw;max-height:100%}
+#mmWrap canvas{position:absolute;inset:0;width:100%;height:100%}
+#mmBot{display:flex;gap:10px;align-items:center;padding:10px 14px;padding-bottom:max(12px,env(safe-area-inset-bottom));background:rgba(15,20,22,.92);border-top:1px solid var(--line)}
+#mmGo{flex:1;font-size:19px;padding:16px}
+#mmX{flex:none;width:52px;height:52px;padding:0;font-size:22px}
+#mmAlert{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);background:rgba(224,176,64,.95);color:#1b1400;font-weight:700;padding:10px 16px;border-radius:10px;display:none;line-height:1.3;text-align:center}
 </style>
 </head>
 <body>
@@ -62,69 +76,77 @@ ol{margin:6px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
   <div class="card">
     <h2>3 · <span data-t="camT"></span></h2>
     <p data-t="camP"></p>
-    <div class="row"><button class="btn pri" id="camGo" data-t="camGo"></button><button class="btn" id="camWhite" data-t="camWhite" disabled></button><button class="btn" id="camLock" data-t="camLock" disabled></button></div>
-    <div class="row" style="margin-top:8px"><button class="btn" id="expDn" data-t="expDn" disabled></button><button class="btn" id="expUp" data-t="expUp" disabled></button></div>
-    <div class="camwrap" id="camwrap"><video id="vid" playsinline muted></video><canvas id="ov"></canvas></div>
-    <canvas id="cv" style="display:none"></canvas>
-    <div class="boxes" id="boxes"></div>
-    <div class="res" id="camRes"></div>
+    <button class="btn pri big" id="mmOpen" data-t="mmOpen"></button>
+    <div class="res" id="openRes"></div>
   </div>
 
   <div class="card">
-    <h2>4 · <span data-t="runT"></span></h2>
-    <p data-t="runP"></p>
-    <div class="row"><button class="btn pri" id="runGo" data-t="runGo"></button><button class="btn bad" id="runStop" data-t="runStop" disabled></button></div>
-    <div class="prog"><b id="bar"></b></div>
+    <h2>4 · <span data-t="resT"></span></h2>
     <div class="res" id="runRes"></div>
     <div id="sum"></div>
     <div class="row" style="margin-top:10px"><button class="btn" id="dl" data-t="dl" disabled></button><button class="btn" id="cp" data-t="cp" disabled></button></div>
   </div>
 </main>
 <footer><span data-t="foot"></span> · <span id="fv"></span></footer>
+
+<div id="mm">
+  <div id="mmTop"><div id="mmPhase"></div><div id="mmMsg"></div><div id="mmVals"></div><div id="mmBar"><b></b></div></div>
+  <div id="mmStage"><div id="mmWrap"><video id="vid" playsinline muted></video><canvas id="ov"></canvas><div id="mmAlert"></div></div></div>
+  <div id="mmBot"><button class="btn" id="mmX" aria-label="close">✕</button><button class="btn pri" id="mmGo"></button></div>
+</div>
+<canvas id="cv" style="display:none"></canvas>
 <script>
-const PAGE_VERSION='0.2';
+const PAGE_VERSION='0.4';
 const T={
- en:{title:'colour measurement',intro:'Measurement only: it finds out how your strip and your TV really look on your wall, so the colour correction can be computed. Nothing is changed for good; at the end everything is as before.',
-  i1:'Strip: about 1 minute the strip shows its own red, green, blue (the TV picture is black).',i2:'TV: 11 colours on the TV, the strip dark (a preview, not saved).',i3:'Before: the same 11 colours with the strip as it is now.',
+ en:{title:'colour measurement',intro:'Measurement only: it finds out how your strip and your TV really look on your wall, so the colour correction can be computed. Nothing is changed for good; at the end everything is as before. About 3 minutes.',
+  i1:'11 colours on the TV, the strip as it is now (1 min).',i2:'The same colours, the strip dark for a while (a preview, not saved) (1 min).',i3:'The TV turns BLACK on purpose for about 30 s and the strip shows its own red, green, blue.',
   conT:'Connect',conP:'ESP address and settings PIN (the PIN stays in this page\'s memory only, it is never stored).',conGo:'Connect',
   castT:'Cast to the TV',castP:'Press the Cast icon and pick the TV.',
-  camT:'Camera',camP:'Phone still (leaning on something). Drag the two boxes: S onto the side glow on the wall, B onto the bottom glow, both a little away from the screen. Then «TV white» and «Lock».',
-  camGo:'Start camera',camWhite:'TV white (to lock)',camLock:'Lock exposure + WB',expDn:'Darker',expUp:'Brighter',
-  runT:'Measure (~5 min)',runP:'Do not move the phone. The TV and the strip change by themselves. Stop puts everything back.',runGo:'Start measurement',runStop:'Stop',
+  camT:'Measure',camP:'Opens the camera full screen. Best: lean the phone on something (a glass, books) so it does not move; by hand also works, it just measures some colours again. Turn it sideways if the TV fits better.',
+  mmOpen:'Open the camera',resT:'Results',
   dl:'Download data',cp:'Copy data',foot:'AmbiBottom companion · measurement prototype · nothing leaves your browser',
-  need:'First: 1 connected, 2 Cast connected, 3 camera locked.',okCon:'Connected: ',badPin:'PIN not accepted (or wrong).',noPin:'No PIN set on the device: writes are open.',
-  phA:'A · strip colours',phB:'B · TV colours (strip dark)',phC:'C · before (strip as now)',restore:'Putting everything back…',done:'Done. Download or copy the data and send it.',stopped:'Stopped, everything put back.',
-  clip:'clipped',locked:'Locked: ',noLock:'No manual exposure / WB on this camera.',lockFirst:'Lock first.',copied:'Copied.',
-  sumT:'Before (C): side vs bottom, colour difference (smaller = better)',col:'Colour',diff:'Δ',bri:'bottom / side'},
- el:{title:'μέτρηση χρώματος',intro:'Μόνο μέτρηση: βρίσκει πώς φαίνονται πραγματικά η ταινία σου και η TV σου στον τοίχο, για να υπολογιστεί η διόρθωση χρώματος. Δεν αλλάζει τίποτα μόνιμα· στο τέλος όλα είναι όπως πριν.',
-  i1:'Ταινία: για περίπου 1 λεπτό η ταινία δείχνει το δικό της κόκκινο, πράσινο, μπλε (η TV μαύρη).',i2:'TV: 11 χρώματα στην TV, η ταινία σβηστή (προεπισκόπηση, δεν αποθηκεύεται).',i3:'Πριν: τα ίδια 11 χρώματα με την ταινία όπως είναι τώρα.',
+  need:'First connect (1) and Cast (2).',okCon:'Connected: ',badPin:'PIN not accepted (or wrong).',
+  gLock:'Lock',gStart:'Start',gStop:'Stop',gDone:'See the results',
+  mDrag:'Drag the boxes: TV onto the glow ABOVE the TV, B onto the glow below (a little away from the screen). Then Lock.',
+  mLocking:'Locking: the TV shows white, the camera settles…',mDark:'Darker, something was too bright…',
+  mReady:'Locked. Keep the phone still and press Start.',mClip:'Still too bright here: move a box off the brightest spot.',
+  phC:'1 / 3 · The TV plays 11 colours, the strip as it is now',phB:'2 / 3 · The same colours, the strip dark for a while',phA:'3 / 3 · The TV is BLACK on purpose (30 s): the strip shows red, green, blue',
+  again:'measuring again: ',moved:'Moved – hold still',restore:'Putting everything back…',done:'Done. Press «See the results».',stopped:'Stopped, everything put back.',
+  noLock:'This camera cannot lock exposure / white balance.',copied:'Copied.',
+  sumT:'Before (C): TV glow vs bottom, colour difference (smaller = better)',col:'Colour',diff:'Δ',bri:'bottom / TV',retakes:'measured again',unstable:'still unsteady'},
+ el:{title:'μέτρηση χρώματος',intro:'Μόνο μέτρηση: βρίσκει πώς φαίνονται πραγματικά η ταινία σου και η TV σου στον τοίχο, για να υπολογιστεί η διόρθωση χρώματος. Δεν αλλάζει τίποτα μόνιμα· στο τέλος όλα είναι όπως πριν. Περίπου 3 λεπτά.',
+  i1:'11 χρώματα στην TV, η ταινία όπως είναι τώρα (1 λεπτό).',i2:'Τα ίδια χρώματα, η ταινία σβηστή για λίγο (προεπισκόπηση, δεν αποθηκεύεται) (1 λεπτό).',i3:'Η TV γίνεται ΕΠΙΤΗΔΕΣ μαύρη για περίπου 30 s και η ταινία δείχνει το δικό της κόκκινο, πράσινο, μπλε.',
   conT:'Σύνδεση',conP:'Διεύθυνση του ESP και PIN ρυθμίσεων (το PIN μένει μόνο στη μνήμη της σελίδας, δεν αποθηκεύεται πουθενά).',conGo:'Σύνδεση',
   castT:'Cast στην TV',castP:'Πάτα το εικονίδιο Cast και διάλεξε την TV.',
-  camT:'Κάμερα',camP:'Κινητό ακίνητο (ακουμπισμένο κάπου). Σύρε τα δύο κουτάκια: το S στη λάμψη του πλαγίου στον τοίχο, το B στη λάμψη από κάτω, και τα δύο λίγο μακριά από την οθόνη. Μετά «TV λευκή» και «Κλείδωμα».',
-  camGo:'Άνοιγμα κάμερας',camWhite:'TV λευκή (για κλείδωμα)',camLock:'Κλείδωμα έκθεσης + WB',expDn:'Πιο σκοτεινά',expUp:'Πιο φωτεινά',
-  runT:'Μέτρηση (~5 λεπτά)',runP:'Μην κουνάς το κινητό. Η TV και η ταινία αλλάζουν μόνες τους. Το «Διακοπή» τα επαναφέρει όλα.',runGo:'Έναρξη μέτρησης',runStop:'Διακοπή',
+  camT:'Μέτρηση',camP:'Ανοίγει την κάμερα σε όλη την οθόνη. Καλύτερα: ακούμπησε το κινητό κάπου (ποτήρι, βιβλία) για να μην κουνιέται· γίνεται και με το χέρι, απλώς θα ξαναμετρήσει κάποια χρώματα. Γύρισέ το οριζόντια αν χωράει καλύτερα η TV.',
+  mmOpen:'Άνοιγμα κάμερας',resT:'Αποτελέσματα',
   dl:'Λήψη δεδομένων',cp:'Αντιγραφή δεδομένων',foot:'AmbiBottom companion · πρωτότυπο μέτρησης · κανένα δεδομένο δεν φεύγει από τον browser',
-  need:'Πρώτα: 1 σύνδεση, 2 Cast συνδεδεμένο, 3 κάμερα κλειδωμένη.',okCon:'Συνδέθηκε: ',badPin:'Το PIN δεν έγινε δεκτό (ή είναι λάθος).',noPin:'Η συσκευή δεν έχει PIN: οι αλλαγές είναι ανοιχτές.',
-  phA:'A · χρώματα ταινίας',phB:'B · χρώματα TV (ταινία σβηστή)',phC:'C · πριν (ταινία όπως τώρα)',restore:'Επαναφορά όλων…',done:'Τέλος. Κατέβασε ή αντίγραψε τα δεδομένα και στείλ\' τα.',stopped:'Διακόπηκε, όλα επανήλθαν.',
-  clip:'καμένα',locked:'Κλειδώθηκε: ',noLock:'Η κάμερα δεν δίνει χειροκίνητη έκθεση / WB.',lockFirst:'Πρώτα κλείδωμα.',copied:'Αντιγράφηκε.',
-  sumT:'Πριν (C): πλάι vs κάτω, διαφορά χρώματος (μικρότερο = καλύτερα)',col:'Χρώμα',diff:'Δ',bri:'κάτω / πλάι'}};
+  need:'Πρώτα σύνδεση (1) και Cast (2).',okCon:'Συνδέθηκε: ',badPin:'Το PIN δεν έγινε δεκτό (ή είναι λάθος).',
+  gLock:'Κλείδωμα',gStart:'Έναρξη',gStop:'Διακοπή',gDone:'Δες τα αποτελέσματα',
+  mDrag:'Σύρε τα κουτάκια: TV στη λάμψη ΠΑΝΩ από την TV, B στη λάμψη από κάτω (λίγο μακριά από την οθόνη). Μετά Κλείδωμα.',
+  mLocking:'Κλείδωμα: η TV δείχνει λευκό, η κάμερα ηρεμεί…',mDark:'Πιο σκοτεινά, κάτι ήταν πολύ φωτεινό…',
+  mReady:'Κλειδώθηκε. Κράτα το κινητό ακίνητο και πάτα Έναρξη.',mClip:'Ακόμα πολύ φωτεινό εδώ: μετακίνησε το κουτάκι από το πιο φωτεινό σημείο.',
+  phC:'1 / 3 · Η TV παίζει 11 χρώματα, η ταινία όπως είναι τώρα',phB:'2 / 3 · Τα ίδια χρώματα, η ταινία σβηστή για λίγο',phA:'3 / 3 · Η TV είναι ΕΠΙΤΗΔΕΣ μαύρη (30 s): η ταινία δείχνει κόκκινο, πράσινο, μπλε',
+  again:'ξαναμετράω: ',moved:'Κουνήθηκε – κράτα σταθερά',restore:'Επαναφορά όλων…',done:'Τέλος. Πάτα «Δες τα αποτελέσματα».',stopped:'Διακόπηκε, όλα επανήλθαν.',
+  noLock:'Η κάμερα δεν μπορεί να κλειδώσει έκθεση / white balance.',copied:'Αντιγράφηκε.',
+  sumT:'Πριν (C): λάμψη TV vs κάτω, διαφορά χρώματος (μικρότερο = καλύτερα)',col:'Χρώμα',diff:'Δ',bri:'κάτω / TV',retakes:'ξαναμετρήθηκαν',unstable:'ακόμα ασταθή'}};
 const $=id=>document.getElementById(id);
 const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 let L=store.get('ab_lang')||((navigator.language||'').toLowerCase().startsWith('el')?'el':'en');
 const t=k=>T[L][k]||k;
 function lang(l){L=l;store.set('ab_lang',l);document.documentElement.lang=l;document.querySelectorAll('[data-t]').forEach(e=>e.textContent=t(e.dataset.t));
-  $('lEn').className=l==='en'?'on':'';$('lEl').className=l==='el'?'on':'';$('addr').placeholder=l==='el'?'IP του ESP':'ESP IP address';$('pin').placeholder='PIN';}
+  $('lEn').className=l==='en'?'on':'';$('lEl').className=l==='el'?'on':'';$('addr').placeholder=l==='el'?'IP του ESP':'ESP IP address';$('pin').placeholder='PIN';setGo(goState);}
 $('lEn').onclick=()=>lang('en');$('lEl').onclick=()=>lang('el');
 $('pv').textContent=$('fv').textContent='v'+PAGE_VERSION;
 const wait=ms=>new Promise(r=>setTimeout(r,ms));
 const COLS=[['white','#fff'],['grey50','#808080'],['red','#f00'],['green','#0f0'],['blue','#00f'],['yellow','#ff0'],['cyan','#0ff'],['magenta','#f0f'],['orange','#ff8000'],['skin','#e9b48f'],['purple','#8a4fd0']];
 const HOLDOUT=['skin','purple'];
-// measure.mp4: colour k is fully shown from 8k+3 (k=0: 0) to 8k+10 s; we measure 5.5 .. 9 s into each
-const VT={len:93,win:k=>[8*k+5.5,8*k+9]};
-const data={page:'measure',page_version:PAGE_VERSION,ua:navigator.userAgent,started:null,camera:null,boxes:null,saved_strip:null,A:[],B:[],C:[],notes:[]};
+// patterns/measure5.mp4 (60 s): colour k fully shown 5k+3 .. 5k+7 s (k=0: 0 .. 7); we measure 5k+4.3 .. 5k+6.8
+const VID={file:'measure5.mp4',win:k=>[5*k+4.3,5*k+6.8],start:k=>5*k+3.1,len:60};
+const data={page:'measure',page_version:PAGE_VERSION,reference:'top (box TV)',ua:navigator.userAgent,started:null,camera:null,boxes:null,saved_strip:null,A:[],B:[],C:[],notes:[]};
 
 // ---------------- 1. ESP
-let ESP=null,saved=null;
+let ESP=null,saved=null,pinMem='';
 $('addr').value=store.get('ab_addr')||'';
 $('addr').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('pin').focus();}});
 $('pin').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('conGo').click();}});
@@ -133,7 +155,6 @@ const espGet=p=>fetch(ESP+p,{cache:'no-store',targetAddressSpace:'local'}).then(
 const ambiPost=(p,o)=>fetch(ESP+'/ambi/api'+p,{method:'POST',headers:{'Content-Type':'text/plain'},body:JSON.stringify(o),targetAddressSpace:'local'}).then(async r=>{const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error((j.error||('http '+r.status)));return j;});
 // WLED's /json answers OPTIONS, so a JSON POST is fine
 const wledPost=o=>fetch(ESP+'/json/state',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(o),targetAddressSpace:'local'}).then(r=>{if(!r.ok)throw new Error('wled http '+r.status);return r.json();});
-let pinMem='';
 async function unlock(){if(pinMem)await wledPost({pin:pinMem}).catch(()=>{});}
 $('conGo').onclick=async()=>{
   const a=$('addr').value.trim().replace(/^https?:\/\//,'').replace(/\/.*$/,'');if(!a)return;store.set('ab_addr',a);ESP='http://'+a;
@@ -143,12 +164,11 @@ $('conGo').onclick=async()=>{
     const st=await espGet('/ambi/api/state');await unlock();
     const ss=await espGet('/ambi/api/settings/strip');const s=ss.preview&&ss.saved?ss.saved:ss.settings;
     saved={wb_r:s.wb_r,wb_g:s.wb_g,wb_b:s.wb_b,brightness:s.brightness};data.saved_strip={...saved,wb_keep_pure:ss.settings.wb_keep_pure};
-    // a harmless write: the same values as a preview -> 200 = writes allowed
-    await ambiPost('/settings/strip',{preview:true,...saved});
-    await ambiPost('/settings/strip',{...saved});  // and end it at once (same values; the device stays as it was)
+    await ambiPost('/settings/strip',{preview:true,...saved});  // a harmless write: 200 = writes allowed ...
+    await ambiPost('/settings/strip',{...saved});               // ... and end it at once (same values)
     out.className='res ok';out.textContent=t('okCon')+st.bridge_version+' · wb '+saved.wb_r+' / '+saved.wb_g+' / '+saved.wb_b+' · bri '+saved.brightness;
     data.esp_version=st.bridge_version;
-  }catch(e){ESP=ESP;out.className='res bad';out.textContent=(/pin_required|401/.test(String(e))?t('badPin'):'✗ '+e);saved=null;}};
+  }catch(e){out.className='res bad';out.textContent=(/pin_required|401/.test(String(e))?t('badPin'):'✗ '+e);saved=null;}};
 
 // ---------------- 2. Cast
 let castOk=false;
@@ -160,117 +180,158 @@ window.__onGCastApiAvailable=ok=>{if(!ok){$('castRes').textContent='Cast ✗';re
 function castImage(f){const mi=new chrome.cast.media.MediaInfo(new URL('patterns/'+f,location.href).href,'image/png');return sess().loadMedia(new chrome.cast.media.LoadRequest(mi));}
 function castVideo(f){const mi=new chrome.cast.media.MediaInfo(new URL('patterns/'+f,location.href).href,'video/mp4');mi.streamType=chrome.cast.media.StreamType.BUFFERED;return sess().loadMedia(new chrome.cast.media.LoadRequest(mi));}
 
-// ---------------- 3. camera + two boxes
-let track=null,locked=false;
-const box={S:{x:.08,y:.35,w:.12,h:.16},B:{x:.44,y:.80,w:.12,h:.12}};
+// ---------------- 3. measurement mode
+let track=null,locked=false,goState='lock',wakeLock=null;
+const box={S:{x:.44,y:.06,w:.12,h:.10},B:{x:.44,y:.84,w:.12,h:.10}};
 const lin=v=>{v/=255;return v<=0.04045?v/12.92:Math.pow((v+0.055)/1.055,2.4);};
 let live={S:null,B:null};
-$('camGo').onclick=async()=>{
-  try{const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280}},audio:false});
-    track=st.getVideoTracks()[0];const v=$('vid');v.srcObject=st;$('camwrap').style.display='block';await v.play();
-    $('camLock').disabled=false;$('camWhite').disabled=false;loop();
-  }catch(e){$('camRes').className='res bad';$('camRes').textContent='✗ '+e;}};
-$('camWhite').onclick=()=>{if(sess())castImage('frame_white.png').catch(e=>$('camRes').textContent='✗ '+e);};
-async function lockCam(){
-  const c=track.getCapabilities?track.getCapabilities():{},s=track.getSettings(),adv={};
-  if(c.exposureMode&&c.exposureMode.includes('manual')){adv.exposureMode='manual';if(s.exposureTime)adv.exposureTime=s.exposureTime;if(s.iso)adv.iso=s.iso;}
-  if(c.whiteBalanceMode&&c.whiteBalanceMode.includes('manual')){adv.whiteBalanceMode='manual';const ct=c.colorTemperature||{};let k=s.colorTemperature>0?s.colorTemperature:5000;if(ct.min!==undefined)k=Math.max(ct.min,Math.min(ct.max,k));if(ct.step)k=Math.round(k/ct.step)*ct.step;adv.colorTemperature=k;}
-  if(c.focusMode&&c.focusMode.includes('manual'))adv.focusMode='manual';
-  if(!adv.exposureMode&&!adv.whiteBalanceMode){$('camRes').className='res warn';$('camRes').textContent=t('noLock');return;}
-  await track.applyConstraints({advanced:[adv]});locked=true;showLock();$('expDn').disabled=$('expUp').disabled=false;}
-function showLock(){const a=track.getSettings();data.camera={label:track.label,exposureTime:a.exposureTime,iso:a.iso,colorTemperature:a.colorTemperature,exposureMode:a.exposureMode,whiteBalanceMode:a.whiteBalanceMode};
-  $('camRes').className='res ok';$('camRes').textContent=t('locked')+'exp '+a.exposureTime+' · ISO '+a.iso+' · '+a.colorTemperature+' K';}
-$('camLock').onclick=()=>lockCam().catch(e=>{$('camRes').className='res bad';$('camRes').textContent='✗ '+e;});
-async function expScale(f){if(!locked){$('camRes').textContent=t('lockFirst');return;}const c=track.getCapabilities(),s=track.getSettings(),et=c.exposureTime||{};
-  let v=s.exposureTime*f;if(et.min!==undefined)v=Math.max(et.min,Math.min(et.max,v));await track.applyConstraints({advanced:[{exposureMode:'manual',exposureTime:v}]});showLock();}
-$('expDn').onclick=()=>expScale(0.7).catch(e=>$('camRes').textContent='✗ '+e);
-$('expUp').onclick=()=>expScale(1.4).catch(e=>$('camRes').textContent='✗ '+e);
-// dragging: the nearest box follows the finger
+function setGo(s){goState=s;const g=$('mmGo');g.textContent=t({lock:'gLock',start:'gStart',stop:'gStop',done:'gDone',busy:'gLock'}[s]);
+  g.className='btn '+(s==='stop'?'bad':'pri');g.disabled=s==='busy';}
+function mm(phase,msg,p){if(phase!==undefined)$('mmPhase').textContent=phase;if(msg!==undefined)$('mmMsg').textContent=msg;if(p!==undefined)$('mmBar').firstChild.style.width=Math.round(p*100)+'%';}
+async function keepAwake(){try{if('wakeLock' in navigator&&document.visibilityState==='visible')wakeLock=await navigator.wakeLock.request('screen');}catch(e){}}
+document.addEventListener('visibilitychange',()=>{if($('mm').classList.contains('on'))keepAwake();});
+$('mmOpen').onclick=async()=>{
+  if(!saved||!sess()){$('openRes').className='res warn';$('openRes').textContent=t('need');return;}
+  $('openRes').textContent='';$('mm').classList.add('on');keepAwake();
+  try{if(document.documentElement.requestFullscreen)await document.documentElement.requestFullscreen({navigationUI:'hide'});}catch(e){}
+  if(!track||track.readyState!=='live'){
+    try{const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'},width:{ideal:1280}},audio:false});
+      track=st.getVideoTracks()[0];const v=$('vid');v.srcObject=st;await v.play();loop();
+    }catch(e){mm('','✗ '+e);return;}}
+  locked=false;setGo('lock');mm('',t('mDrag'),0);};
+$('mmX').onclick=async()=>{if(running){abort=true;await putBack();}closeMM();};
+function closeMM(){$('mm').classList.remove('on');try{if(document.fullscreenElement)document.exitFullscreen();}catch(e){}try{wakeLock&&wakeLock.release();}catch(e){}wakeLock=null;}
+$('mmGo').onclick=()=>{const f={lock:doLock,start:run,stop:stopRun,done:()=>{closeMM();$('sum').scrollIntoView();}}[goState];if(f)f();};
+// the lock: white on the TV, let the camera settle, lock, then darker until nothing clips
+async function doLock(){
+  setGo('busy');mm('',t('mLocking'));
+  try{
+    try{await track.applyConstraints({advanced:[{exposureMode:'continuous',whiteBalanceMode:'continuous'}]});}catch(e){}
+    await castImage('frame_white.png');await wait(4000);
+    const c=track.getCapabilities?track.getCapabilities():{},s=track.getSettings(),adv={};
+    if(c.exposureMode&&c.exposureMode.includes('manual')){adv.exposureMode='manual';if(s.exposureTime)adv.exposureTime=s.exposureTime;if(s.iso)adv.iso=s.iso;}
+    if(c.whiteBalanceMode&&c.whiteBalanceMode.includes('manual')){adv.whiteBalanceMode='manual';const ct=c.colorTemperature||{};let k=s.colorTemperature>0?s.colorTemperature:5000;if(ct.min!==undefined)k=Math.max(ct.min,Math.min(ct.max,k));if(ct.step)k=Math.round(k/ct.step)*ct.step;adv.colorTemperature=k;}
+    if(c.focusMode&&c.focusMode.includes('manual'))adv.focusMode='manual';
+    if(!adv.exposureMode&&!adv.whiteBalanceMode){mm('',t('noLock'));setGo('lock');return;}
+    await track.applyConstraints({advanced:[adv]});await wait(800);
+    for(let i=0;i<8;i++){const cl=Math.max(live.S?live.S.clip:0,live.B?live.B.clip:0);if(cl<=0.005)break;
+      mm('',t('mDark'));const cc=track.getCapabilities(),ss=track.getSettings(),et=cc.exposureTime||{};let v=ss.exposureTime*0.7;if(et.min!==undefined)v=Math.max(et.min,v);
+      if(ss.exposureTime&&v>=ss.exposureTime)break;await track.applyConstraints({advanced:[{exposureMode:'manual',exposureTime:v}]});await wait(700);}
+    locked=true;const a=track.getSettings();data.camera={label:track.label,exposureTime:a.exposureTime,iso:a.iso,colorTemperature:a.colorTemperature,exposureMode:a.exposureMode,whiteBalanceMode:a.whiteBalanceMode};
+    const cl=Math.max(live.S?live.S.clip:0,live.B?live.B.clip:0);
+    mm('',(cl>0.005?t('mClip')+' ':'')+t('mReady'));setGo('start');
+  }catch(e){mm('','✗ '+e);setGo('lock');}}
+// dragging: the nearest box follows the finger (not while measuring)
 const ov=$('ov');let drag=null;
 function rel(e){const r=ov.getBoundingClientRect();return [(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height];}
-ov.addEventListener('pointerdown',e=>{const [x,y]=rel(e);let best=null,bd=9;for(const k in box){const b=box[k],d=Math.hypot(x-(b.x+b.w/2),y-(b.y+b.h/2));if(d<bd){bd=d;best=k;}}drag=best;ov.setPointerCapture(e.pointerId);move(e);});
+ov.addEventListener('pointerdown',e=>{if(running)return;const [x,y]=rel(e);let best=null,bd=9;for(const k in box){const b=box[k],d=Math.hypot(x-(b.x+b.w/2),y-(b.y+b.h/2));if(d<bd){bd=d;best=k;}}drag=best;ov.setPointerCapture(e.pointerId);move(e);});
 ov.addEventListener('pointermove',e=>{if(drag)move(e);});
 ov.addEventListener('pointerup',()=>{drag=null;});
-function move(e){if(running)return;const [x,y]=rel(e),b=box[drag];b.x=Math.max(0,Math.min(1-b.w,x-b.w/2));b.y=Math.max(0,Math.min(1-b.h,y-b.h/2));}
+function move(e){const [x,y]=rel(e),b=box[drag];b.x=Math.max(0,Math.min(1-b.w,x-b.w/2));b.y=Math.max(0,Math.min(1-b.h,y-b.h/2));}
 function meanBox(d,W,H,b){const x0=Math.round(b.x*W),y0=Math.round(b.y*H),w=Math.max(1,Math.round(b.w*W)),h=Math.max(1,Math.round(b.h*H));
   let r=0,g=0,bl=0,n=0,cl=0;for(let y=y0;y<y0+h;y++)for(let x=x0;x<x0+w;x++){const i=(y*W+x)*4;if(d[i]>=250||d[i+1]>=250||d[i+2]>=250){cl++;continue;}r+=lin(d[i]);g+=lin(d[i+1]);bl+=lin(d[i+2]);n++;}
   return n?{m:[r/n,g/n,bl/n],clip:cl/(n+cl)}:{m:null,clip:1};}
-let collect=null;
+// phone motion (gyroscope): the largest rotation rate seen since the last reset, deg/s
+let motionMax=0;window.addEventListener('devicemotion',e=>{const r=e.rotationRate;if(!r)return;const m=Math.hypot(r.alpha||0,r.beta||0,r.gamma||0);if(m>motionMax)motionMax=m;});
+const MOTION_LIMIT=6;let collect=null;
 function loop(){
   const v=$('vid');if(!track||track.readyState!=='live')return;
   const W=320,H=Math.round(320*v.videoHeight/Math.max(1,v.videoWidth)),cv=$('cv');cv.width=W;cv.height=H;const x=cv.getContext('2d',{willReadFrequently:true});x.drawImage(v,0,0,W,H);
   const d=x.getImageData(0,0,W,H).data;live.S=meanBox(d,W,H,box.S);live.B=meanBox(d,W,H,box.B);
   if(collect)collect.push({t:performance.now(),S:live.S,B:live.B});
-  ov.width=ov.clientWidth;ov.height=ov.clientHeight;const o=ov.getContext('2d');o.clearRect(0,0,ov.width,ov.height);o.lineWidth=2;o.font='13px system-ui';
-  for(const k in box){const b=box[k];o.strokeStyle=k==='S'?'#70d8cc':'#e0b040';o.setLineDash([6,4]);o.strokeRect(b.x*ov.width,b.y*ov.height,b.w*ov.width,b.h*ov.height);o.fillStyle=o.strokeStyle;o.fillText(k,b.x*ov.width+4,b.y*ov.height+14);}
-  const f=s=>s&&s.m?s.m.map(v=>v.toFixed(3)).join(' / ')+(s.clip>0.01?' · '+t('clip')+' '+Math.round(s.clip*100)+' %':''):'–';
-  $('boxes').innerHTML='<span style="color:#70d8cc">S</span><span>'+f(live.S)+'</span><span style="color:#e0b040">B</span><span>'+f(live.B)+'</span>';
+  ov.width=ov.clientWidth;ov.height=ov.clientHeight;const o=ov.getContext('2d');o.clearRect(0,0,ov.width,ov.height);o.lineWidth=3;o.font='bold 15px system-ui';
+  for(const k in box){const b=box[k];o.strokeStyle=k==='S'?'#70d8cc':'#e0b040';o.setLineDash([8,5]);o.strokeRect(b.x*ov.width,b.y*ov.height,b.w*ov.width,b.h*ov.height);o.fillStyle=o.strokeStyle;o.fillText(k==='S'?'TV':'B',b.x*ov.width+5,b.y*ov.height+17);}
+  const f=s=>s&&s.m?s.m.map(v=>v.toFixed(3)).join('/')+(s.clip>0.005?' ⚠'+Math.round(s.clip*100)+'%':''):'–';
+  $('mmVals').textContent='TV '+f(live.S)+'   B '+f(live.B);
   setTimeout(loop,200);}
 function avg(rows,key){const xs=rows.map(r=>r[key]).filter(s=>s&&s.m);if(!xs.length)return null;
   return {m:[0,1,2].map(i=>+(xs.reduce((a,s)=>a+s.m[i],0)/xs.length).toFixed(5)),clip:+(xs.reduce((a,s)=>a+s.clip,0)/xs.length).toFixed(3),n:xs.length,
     sd:[0,1,2].map(i=>{const mu=xs.reduce((a,s)=>a+s.m[i],0)/xs.length;return +(Math.sqrt(xs.reduce((a,s)=>a+(s.m[i]-mu)**2,0)/xs.length)/(mu||1)).toFixed(4);})};}
+// unsteady = the phone turned, or a lit box flickered (> 8 % on its strongest channel)
+function unsteady(r,keys){if(r.motion>MOTION_LIMIT)return true;
+  return keys.some(k=>{const s=r[k];if(!s||!s.m)return true;const i=s.m.indexOf(Math.max(...s.m));return s.m[i]>0.003&&s.sd[i]>0.08;});}
+function alertMoved(on){const a=$('mmAlert');a.textContent=t('moved');a.style.display=on?'block':'none';}
 
-// ---------------- 4. the run
+// ---------------- the run
 let running=false,abort=false,phaseA=false,previewOn=false,wledSaved=null;
-const step=(p,txt)=>{$('bar').style.width=Math.round(p*100)+'%';$('runRes').className='res mut';$('runRes').textContent=txt;};
 async function espBottom(){try{const s=await espGet('/ambi/api/state');const leds=(s.output&&s.output.leds)||[];
   const ml=leds.length?[0,1,2].map(i=>leds.reduce((a,c)=>a+c[i],0)/leds.length):null;
   return {lamps:(s.bottom||[]).map(l=>({xy:l.xy,bri8:l.bri8,rgb:l.rgb})),leds_mean:ml&&ml.map(v=>+v.toFixed(1)),ma:s.output&&s.output.estimated_ma};}catch(e){return {error:String(e)};}}
-async function holdMeasure(ms){collect=[];await wait(ms);const rows=collect;collect=null;return {S:avg(rows,'S'),B:avg(rows,'B')};}
-async function phaseStrip(){
-  phaseA=true;step(0.02,t('phA'));
-  await castImage('black.png');await wait(4000);
+async function measureUntil(endFn,withEsp){collect=[];motionMax=0;const esp=[];
+  while(!endFn()&&!abort){if(withEsp)esp.push(await espBottom());await wait(withEsp?400:150);}
+  const rows=collect;collect=null;return {S:avg(rows,'S'),B:avg(rows,'B'),motion:+motionMax.toFixed(1),esp};}
+async function phaseStrip(p0,p1){
+  phaseA=true;mm(t('phA'),'',p0);
+  await castImage('black.png');await wait(3500);
   wledSaved=await espGet('/json/state');
-  await unlock();await ambiPost('/service',{action:'stop'});await wait(2500);
+  await unlock();await ambiPost('/service',{action:'stop'});await wait(2000);
   const seq=[['off',0,0,0],['r96',96,0,0],['g96',0,96,0],['b96',0,0,96],['w96',96,96,96],['r192',192,0,0],['g192',0,192,0],['b192',0,0,192],['off2',0,0,0]];
-  for(let i=0;i<seq.length&&!abort;i++){const [n,r,g,b]=seq[i];step(0.02+0.2*i/seq.length,t('phA')+' · '+n);
-    await wledPost({on:true,bri:255,transition:0,seg:[{id:0,fx:0,col:[[r,g,b]]}]});await wait(2500);
-    const m=await holdMeasure(2000);data.A.push({name:n,pwm:[r,g,b],...m});}
+  for(let i=0;i<seq.length&&!abort;i++){const [n,r,g,b]=seq[i];
+    await wledPost({on:true,bri:255,transition:0,seg:[{id:0,fx:0,col:[[r,g,b]]}]});
+    let m=null,tries=0;
+    do{if(tries)mm(undefined,t('again')+n);else mm(undefined,n,p0+(p1-p0)*i/seq.length);
+      await wait(1200);const end=performance.now()+2000;m=await measureUntil(()=>performance.now()>=end,false);
+      const bad=unsteady(m,['B']);alertMoved(bad);if(!bad)break;tries++;}while(tries<3&&!abort);
+    alertMoved(false);delete m.esp;data.A.push({name:n,pwm:[r,g,b],tries,...m});}
   await restoreStrip();}
 async function restoreStrip(){
   if(!phaseA)return;
   try{if(wledSaved){const s0=(wledSaved.seg||[])[0]||{};await wledPost({on:wledSaved.on,bri:wledSaved.bri,transition:7,seg:[{id:0,fx:s0.fx,col:s0.col}]});}}catch(e){data.notes.push('wled restore: '+e);}
   try{await unlock();await ambiPost('/service',{action:'start'});}catch(e){data.notes.push('service start: '+e);}
-  phaseA=false;await wait(3000);}
+  phaseA=false;await wait(2500);}
 async function phaseTv(key,label,p0,p1){
-  await castVideo('measure.mp4');const t0=performance.now();
+  mm(label,'',p0);
+  await castVideo(VID.file);const t0=performance.now();
   const player=new cast.framework.RemotePlayer(),ctl=new cast.framework.RemotePlayerController(player);let vt=null,vtAt=0;
   const onT=()=>{vt=player.currentTime;vtAt=performance.now();};ctl.addEventListener(cast.framework.RemotePlayerEventType.CURRENT_TIME_CHANGED,onT);
   const now=()=>vt!==null&&vt>0?vt+(performance.now()-vtAt)/1000:(performance.now()-t0)/1000;
-  for(let k=0;k<COLS.length&&!abort;k++){const [a,b]=VT.win(k);
+  const keys=key==='B'?['S']:['S','B'];  // in B the strip is dark: only the TV box counts
+  const res=[],redo=[];
+  for(let k=0;k<COLS.length&&!abort;k++){const [a,b]=VID.win(k);
     while(now()<a&&!abort)await wait(100);
-    step(p0+(p1-p0)*k/COLS.length,label+' · '+COLS[k][0]);
-    collect=[];const esp=[];while(now()<b&&!abort){esp.push(await espBottom());await wait(400);}
-    const rows=collect;collect=null;
-    data[key].push({name:COLS[k][0],holdout:HOLDOUT.includes(COLS[k][0]),S:avg(rows,'S'),B:avg(rows,'B'),esp,clock:vt!==null?'cast':'local'});}
+    mm(undefined,COLS[k][0],p0+(p1-p0)*k/COLS.length);
+    const m=await measureUntil(()=>now()>=b,true);const bad=unsteady(m,keys);alertMoved(bad);
+    res[k]={name:COLS[k][0],holdout:HOLDOUT.includes(COLS[k][0]),tries:0,...m,clock:vt!==null?'cast':'local'};if(bad)redo.push(k);}
+  alertMoved(false);
+  // colours that moved: seek back and measure them once more (keep the steadier one)
+  for(const k of redo){if(abort)break;
+    mm(undefined,t('again')+COLS[k][0]);
+    const target=VID.start(k);
+    try{player.currentTime=target;ctl.seek();vt=target;vtAt=performance.now();}catch(e){data.notes.push('seek: '+e);break;}
+    const [a,b]=VID.win(k);while(now()<a&&!abort)await wait(100);
+    const m=await measureUntil(()=>now()>=b,true);const bad=unsteady(m,keys);alertMoved(bad);
+    if(!bad||m.motion<res[k].motion)res[k]={...res[k],...m,tries:1};else res[k].tries=1;}
+  alertMoved(false);
+  res.forEach(r=>{if(r){r.unsteady=unsteady(r,keys);data[key].push(r);}});
   try{ctl.removeEventListener(cast.framework.RemotePlayerEventType.CURRENT_TIME_CHANGED,onT);}catch(e){}}
 async function previewDark(){await unlock();await ambiPost('/settings/strip',{preview:true,...saved,brightness:0});previewOn=true;}
 async function endPreview(){if(!previewOn)return;try{await unlock();await ambiPost('/settings/strip',{...saved});}catch(e){data.notes.push('end preview: '+e);}previewOn=false;}
-async function putBack(){$('runRes').textContent=t('restore');await restoreStrip();await endPreview();}
-$('runGo').onclick=async()=>{
-  if(!saved||!sess()||!locked){$('runRes').className='res warn';$('runRes').textContent=t('need');return;}
-  running=true;abort=false;$('runGo').disabled=true;$('runStop').disabled=false;$('dl').disabled=$('cp').disabled=true;$('sum').innerHTML='';
-  data.A=[];data.B=[];data.C=[];data.notes=[];data.started=new Date().toISOString();data.boxes=JSON.parse(JSON.stringify(box));showLock();
+async function putBack(){mm(undefined,t('restore'));await restoreStrip();await endPreview();}
+async function run(){
+  running=true;abort=false;setGo('stop');$('dl').disabled=$('cp').disabled=true;$('sum').innerHTML='';$('runRes').textContent='';
+  data.A=[];data.B=[];data.C=[];data.notes=[];data.started=new Date().toISOString();data.boxes=JSON.parse(JSON.stringify(box));
   try{
-    await phaseStrip();
-    if(!abort){await previewDark();await phaseTv('B',t('phB'),0.25,0.62);}
+    await phaseTv('C',t('phC'),0,0.4);
+    if(!abort){await previewDark();await phaseTv('B',t('phB'),0.4,0.8);}
     await endPreview();
-    if(!abort){await wait(1500);await phaseTv('C',t('phC'),0.62,1);}
-    data.camera_end=track.getSettings&&{exposureTime:track.getSettings().exposureTime,iso:track.getSettings().iso,colorTemperature:track.getSettings().colorTemperature};
-    if(abort){$('runRes').className='res warn';$('runRes').textContent=t('stopped');}
-    else{step(1,'');$('runRes').className='res ok';$('runRes').textContent=t('done');summary();}
-  }catch(e){data.notes.push('error: '+e);await putBack();$('runRes').className='res bad';$('runRes').textContent='✗ '+e+'\n'+t('stopped');}
-  running=false;$('runGo').disabled=false;$('runStop').disabled=true;$('dl').disabled=$('cp').disabled=false;};
-$('runStop').onclick=async()=>{abort=true;$('runStop').disabled=true;await putBack();};
+    if(!abort){await wait(1200);await phaseStrip(0.8,1);}
+    const a=track.getSettings();data.camera_end={exposureTime:a.exposureTime,iso:a.iso,colorTemperature:a.colorTemperature};
+    if(abort){mm('',t('stopped'));setGo('start');}
+    else{mm('',t('done'),1);setGo('done');summary();}
+  }catch(e){data.notes.push('error: '+e);await putBack();mm('','✗ '+e+' · '+t('stopped'));setGo('start');}
+  running=false;$('dl').disabled=$('cp').disabled=false;$('runRes').textContent=abort?t('stopped'):'';}
+async function stopRun(){abort=true;setGo('busy');await putBack();}
 window.addEventListener('pagehide',()=>{if(!ESP)return;const b=(p,o)=>{try{navigator.sendBeacon(ESP+'/ambi/api'+p,JSON.stringify(o));}catch(e){}};
   if(phaseA)b('/service',{action:'start'});if(previewOn&&saved)b('/settings/strip',{...saved});});
 function chroma(m){const s=m[0]+m[1]+m[2]||1;return [m[0]/s,m[1]/s];}
 function summary(){
+  const nRe=['A','B','C'].reduce((a,k)=>a+data[k].filter(r=>r.tries).length,0),nBad=['B','C'].reduce((a,k)=>a+data[k].filter(r=>r.unsteady).length,0);
   let h='<p class="mut" style="margin:10px 0 0">'+t('sumT')+'</p><table><tr><th>'+t('col')+'</th><th>'+t('diff')+'</th><th>'+t('bri')+'</th></tr>';
   data.C.forEach((r,i)=>{if(!r.S||!r.B)return;const a=chroma(r.S.m),b=chroma(r.B.m),d=Math.hypot(a[0]-b[0],a[1]-b[1])*100;
     const ys=0.2126*r.S.m[0]+0.7152*r.S.m[1]+0.0722*r.S.m[2],yb=0.2126*r.B.m[0]+0.7152*r.B.m[1]+0.0722*r.B.m[2];
-    h+='<tr><td><span class="sw" style="background:'+COLS[i][1]+'"></span>'+r.name+(r.holdout?' *':'')+'</td><td class="'+(d<2?'ok':d<5?'warn':'bad')+'">'+d.toFixed(1)+'</td><td>'+(ys>0?Math.round(100*yb/ys)+' %':'–')+'</td></tr>';});
-  $('sum').innerHTML=h+'</table>';}
+    h+='<tr><td><span class="sw" style="background:'+COLS[i][1]+'"></span>'+r.name+(r.holdout?' *':'')+(r.unsteady?' ⚠':'')+'</td><td class="'+(d<2?'ok':d<5?'warn':'bad')+'">'+d.toFixed(1)+'</td><td>'+(ys>0?Math.round(100*yb/ys)+' %':'–')+'</td></tr>';});
+  $('sum').innerHTML=h+'</table><p class="mut" style="margin:8px 0 0">'+t('retakes')+': '+nRe+' · '+t('unstable')+': '+nBad+'</p>';
+  $('runRes').className='res ok';$('runRes').textContent=t('done').split('.')[0]+'.';}
 $('dl').onclick=()=>{const b=new Blob([JSON.stringify(data,null,1)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='ambibottom-measure-'+(data.started||'').replace(/[:.]/g,'-')+'.json';a.click();};
 $('cp').onclick=async()=>{try{await navigator.clipboard.writeText(JSON.stringify(data));$('runRes').textContent=t('copied');}catch(e){$('runRes').textContent='✗ '+e;}};
 lang(L);
