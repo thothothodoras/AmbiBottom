@@ -78,7 +78,7 @@ const T={
  en:{title:'browser check',intro:'This page checks what THIS browser can do for the colour calibration: talk to your AmbiBottom, show test patterns on the TV, and lock the camera. Nothing is sent anywhere except to your ESP and your TV.',
   espT:'Talk to the ESP',espP:'Type the ESP\'s address (IP, e.g. 192.0.2.20). Chrome may ask to allow access to devices on your local network: allow it. Read only, nothing is changed.',test:'Test',
   castT:'Test patterns on the TV (Cast)',castP:'Press the Cast icon, pick the TV, then a colour. The TV downloads the picture from this site.',
-  camT:'Camera',camP:'Point the phone at the wall next to the TV. Then press «Lock» and change the pattern: if the numbers stay put when only the TV changes, the lock works.',camStart:'Start camera',camLock:'Lock exposure + white balance',
+  camT:'Camera',camP:'Lock test: aim the middle of the picture at the side glow on the wall, with the TV screen in the picture. Press «Lock», then cast «White» and «White frame, black centre» a few times. The Ambilight stays the same (it reads the edges), only the screen gets darker or brighter. Locked = the spread stays a few %; not locked = the numbers jump.',camStart:'Start camera',camLock:'Lock exposure + white balance',
   repT:'Report',repP:'Copy the results and paste them in the chat.',repCopy:'Copy report',foot:'AmbiBottom companion · test page · no data leaves your browser',
   ok:'OK',fail:'Failed',notChrome:'Cast needs Chrome (desktop or Android).',castNo:'Cast not available in this browser.',castReady:'Cast ready: press the icon.',castOn:'Connected to ',castNoSess:'Press the Cast icon first.',sent:'Sent: ',
   mixed:'The browser blocked the request (mixed content / local network access). This browser needs the fallback (open the ESP page in a second window).',
@@ -86,12 +86,12 @@ const T={
  el:{title:'έλεγχος browser',intro:'Η σελίδα ελέγχει τι μπορεί ΑΥΤΟΣ ο browser για τη βαθμονόμηση χρώματος: να μιλήσει με το AmbiBottom, να δείξει μοτίβα στην TV, να κλειδώσει την κάμερα. Τίποτα δεν στέλνεται πουθενά, εκτός από το ESP και την TV σου.',
   espT:'Σύνδεση με το ESP',espP:'Γράψε τη διεύθυνση του ESP (IP, π.χ. 192.0.2.20). Το Chrome μπορεί να ρωτήσει αν επιτρέπεις πρόσβαση σε συσκευές του τοπικού δικτύου: πάτα να επιτρέπεται. Μόνο ανάγνωση, δεν αλλάζει τίποτα.',test:'Δοκιμή',
   castT:'Μοτίβα στην TV (Cast)',castP:'Πάτα το εικονίδιο Cast, διάλεξε την TV, μετά ένα χρώμα. Η TV κατεβάζει την εικόνα από αυτό το site.',
-  camT:'Κάμερα',camP:'Στρέψε το κινητό στον τοίχο δίπλα στην TV. Μετά πάτα «Κλείδωμα» και άλλαξε μοτίβο: αν τα νούμερα μένουν ίδια όταν αλλάζει μόνο η TV, το κλείδωμα δουλεύει.',camStart:'Άνοιγμα κάμερας',camLock:'Κλείδωμα έκθεσης + white balance',
+  camT:'Κάμερα',camP:'Δοκιμή κλειδώματος: στρέψε τη μέση του κάδρου στη λάμψη του πλαγίου στον τοίχο, να φαίνεται και η οθόνη της TV. Πάτα «Κλείδωμα» και μετά κάνε cast «Λευκό» και «Λευκό πλαίσιο, μαύρη μέση» μερικές φορές. Το Ambilight μένει ίδιο (διαβάζει τις άκρες), αλλάζει μόνο πόσο φωτίζει η οθόνη. Κλειδωμένο = η διακύμανση μένει λίγα %· ξεκλείδωτο = τα νούμερα πηδάνε.',camStart:'Άνοιγμα κάμερας',camLock:'Κλείδωμα έκθεσης + white balance',
   repT:'Αναφορά',repP:'Αντίγραψε τα αποτελέσματα και επικόλλησέ τα στη συζήτηση.',repCopy:'Αντιγραφή αναφοράς',foot:'AmbiBottom companion · δοκιμαστική σελίδα · κανένα δεδομένο δεν φεύγει από τον browser',
   ok:'OK',fail:'Απέτυχε',notChrome:'Το Cast θέλει Chrome (υπολογιστή ή Android).',castNo:'Το Cast δεν υπάρχει σε αυτόν τον browser.',castReady:'Το Cast είναι έτοιμο: πάτα το εικονίδιο.',castOn:'Συνδέθηκε με ',castNoSess:'Πάτα πρώτα το εικονίδιο Cast.',sent:'Στάλθηκε: ',
   mixed:'Ο browser μπλόκαρε το αίτημα (mixed content / πρόσβαση στο τοπικό δίκτυο). Αυτός ο browser θα χρειαστεί την εναλλακτική λύση (σελίδα του ESP σε δεύτερο παράθυρο).',
   perm:'Άδεια τοπικού δικτύου: ',noCam:'Χωρίς πρόσβαση στην κάμερα: ',stab:'Κεντρικό κουτί, γραμμικό RGB, τελευταία 3 s',spread:'διακύμανση',locked:'Ζητήθηκε κλείδωμα. Ρυθμίσεις τώρα:',noLock:'Αυτή η κάμερα δεν δίνει εδώ χειροκίνητη έκθεση / white balance.',copied:'Αντιγράφηκε.'}};
-const PATS=[['white','#fff','White','Λευκό'],['grey192','#c0c0c0','Grey 75%','Γκρι 75%'],['grey128','#808080','Grey 50%','Γκρι 50%'],['grey64','#404040','Grey 25%','Γκρι 25%'],['black','#000','Black','Μαύρο'],
+const PATS=[['white','#fff','White','Λευκό'],['frame_white','#000;box-shadow:inset 0 0 0 4px #fff','White frame, black centre','Λευκό πλαίσιο, μαύρη μέση'],['grey192','#c0c0c0','Grey 75%','Γκρι 75%'],['grey128','#808080','Grey 50%','Γκρι 50%'],['grey64','#404040','Grey 25%','Γκρι 25%'],['black','#000','Black','Μαύρο'],
  ['red','#f00','Red','Κόκκινο'],['green','#0f0','Green','Πράσινο'],['blue','#00f','Blue','Μπλε'],['yellow','#ff0','Yellow','Κίτρινο'],['cyan','#0ff','Cyan','Κυανό'],['magenta','#f0f','Magenta','Ματζέντα'],
  ['orange','#ff8000','Orange','Πορτοκαλί'],['skin','#e9b48f','Skin','Δέρμα'],['purple','#8a4fd0','Purple','Μωβ']];
 const $=id=>document.getElementById(id);
@@ -108,6 +108,7 @@ $('ua').textContent=navigator.userAgent+(window.isSecureContext?' · secure cont
 
 // ---- 1. ESP (read only)
 $('addr').value=store.get('ab_addr')||'';
+$('addr').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('espGo').click();}});
 async function permState(){for(const n of ['local-network-access','local-network']){try{const p=await navigator.permissions.query({name:n});return n+'='+p.state;}catch(e){}}return 'n/a';}
 $('espGo').onclick=async()=>{
   const a=$('addr').value.trim().replace(/^https?:\/\//,'').replace(/\/.*$/,'');if(!a)return;store.set('ab_addr',a);
@@ -130,7 +131,8 @@ function castPat(f){
   const s=cast.framework.CastContext.getInstance().getCurrentSession();if(!s){$('castRes').textContent=t('castNoSess');return;}
   const url=new URL('patterns/'+f+'.png',location.href).href;
   const mi=new chrome.cast.media.MediaInfo(url,'image/png');mi.metadata=new chrome.cast.media.PhotoMediaMetadata();mi.metadata.title='AmbiBottom '+f;
-  s.loadMedia(new chrome.cast.media.LoadRequest(mi)).then(()=>{$('castRes').textContent=t('sent')+f;(report.cast=report.cast||{}).sent=(report.cast.sent||0)+1;},
+  if(report.camera&&report.camera.last){(report.camera.per_cast=report.camera.per_cast||[]).push({next_cast:f,locked:!!report.camera.lock&&!report.camera.lock.error,rgb:report.camera.last.rgb,spread_pct:report.camera.last.spread_pct});}
+  s.loadMedia(new chrome.cast.media.LoadRequest(mi)).then(()=>{hist=[];$('castRes').textContent=t('sent')+f;(report.cast=report.cast||{}).sent=(report.cast.sent||0)+1;},
     e=>{$('castRes').textContent=t('fail')+': '+e;(report.cast=report.cast||{}).error=String(e);});}
 window.__onGCastApiAvailable=ok=>{
   report.cast={api:ok};
@@ -159,9 +161,9 @@ $('camGo').onclick=async()=>{
 $('camLock').onclick=async()=>{
   const c=track.getCapabilities?track.getCapabilities():{},s=track.getSettings(),adv={};
   if(c.exposureMode&&c.exposureMode.includes('manual')){adv.exposureMode='manual';if(s.exposureTime)adv.exposureTime=s.exposureTime;if(s.iso)adv.iso=s.iso;}
-  if(c.whiteBalanceMode&&c.whiteBalanceMode.includes('manual')){adv.whiteBalanceMode='manual';if(s.colorTemperature)adv.colorTemperature=s.colorTemperature;}
+  if(c.whiteBalanceMode&&c.whiteBalanceMode.includes('manual')){adv.whiteBalanceMode='manual';const ct=c.colorTemperature||{};let k=s.colorTemperature>0?s.colorTemperature:5000;if(ct.min!==undefined)k=Math.max(ct.min,Math.min(ct.max,k));if(ct.step)k=Math.round(k/ct.step)*ct.step;adv.colorTemperature=k;}
   if(!Object.keys(adv).length){$('camRes').className='res warn';$('camRes').textContent=t('noLock');report.camera.lock='unsupported';return;}
-  try{await track.applyConstraints({advanced:[adv]});const after=track.getSettings();
+  try{await track.applyConstraints({advanced:[adv]});hist=[];const after=track.getSettings();
     $('camRes').className='res ok';$('camRes').textContent=t('locked')+' '+JSON.stringify(Object.fromEntries(KEYS.filter(k=>after[k]!==undefined).map(k=>[k,after[k]])));
     report.camera.lock={asked:adv,after:Object.fromEntries(KEYS.filter(k=>after[k]!==undefined).map(k=>[k,after[k]]))};showCaps();
   }catch(e){$('camRes').className='res bad';$('camRes').textContent=t('fail')+': '+e;report.camera.lock={error:String(e)};}};
