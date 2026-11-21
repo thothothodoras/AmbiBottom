@@ -54,6 +54,8 @@ jadx*/
 # ---- measurements, captures, generated patterns -------------------------------------
 /results/
 *.mp4
+# ...except the companion's test-pattern videos (served by GitHub Pages)
+!docs/companion/patterns/*.mp4
 *.pcap
 *.pcapng
 
