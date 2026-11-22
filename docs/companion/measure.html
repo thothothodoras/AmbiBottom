@@ -51,6 +51,8 @@ ol{margin:6px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
 #mmGo{flex:1;font-size:19px;padding:16px}
 #mmX{flex:none;width:52px;height:52px;padding:0;font-size:22px}
 #mmCount{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);font-size:96px;font-weight:800;color:#fff;text-shadow:0 2px 12px #000;display:none;line-height:1}
+#mmPlace{position:absolute;left:8px;right:8px;top:8px;padding:10px 12px;border-radius:10px;font-weight:700;line-height:1.3;display:none;font-size:15px}
+#mmPlace.ok{background:rgba(92,207,138,.95);color:#052b14}#mmPlace.bad{background:rgba(224,106,90,.95);color:#2b0805}
 #mmAlert{position:absolute;left:50%;top:40%;transform:translate(-50%,-50%);background:rgba(224,176,64,.95);color:#1b1400;font-weight:700;padding:10px 16px;border-radius:10px;display:none;line-height:1.3;text-align:center}
 </style>
 </head>
@@ -86,6 +88,12 @@ ol{margin:6px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
     <h2>4 · <span data-t="resT"></span></h2>
     <div class="res" id="runRes"></div>
     <div id="sum"></div>
+    <div id="tryBox" style="display:none;margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
+      <p class="mut" data-t="tryP"></p>
+      <div class="row"><button class="btn pri" id="tryOn" data-t="tryOn"></button><button class="btn" id="tryOff" data-t="tryOff" disabled></button></div>
+      <div class="row" style="margin-top:8px" id="tryPats"></div>
+      <div class="res" id="tryRes"></div>
+    </div>
     <div class="row" style="margin-top:10px"><button class="btn" id="dl" data-t="dl" disabled></button><button class="btn" id="cp" data-t="cp" disabled></button></div>
   </div>
 </main>
@@ -94,11 +102,11 @@ ol{margin:6px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
 <div id="mm">
   <div id="mmTop"><div id="mmBot"><button class="btn pri" id="mmGo"></button><button class="btn" id="mmX" aria-label="close">✕</button></div>
     <div id="mmPhase"></div><div id="mmMsg"></div><div id="mmVals"></div><div id="mmBar"><b></b></div></div>
-  <div id="mmStage"><div id="mmWrap"><video id="vid" playsinline muted></video><canvas id="ov"></canvas><div id="mmCount"></div><div id="mmAlert"></div></div></div>
+  <div id="mmStage"><div id="mmWrap"><video id="vid" playsinline muted></video><canvas id="ov"></canvas><div id="mmCount"></div><div id="mmAlert"></div><div id="mmPlace"></div></div></div>
 </div>
 <canvas id="cv" style="display:none"></canvas>
 <script>
-const PAGE_VERSION='0.9';
+const PAGE_VERSION='0.10';
 const T={
  en:{title:'colour measurement',intro:'Measurement only: it finds out how your strip and your TV really look on your wall, so the colour correction can be computed. Nothing is changed for good; at the end everything is as before. About 3 minutes.',
   i1:'Colours on the TV, the strip as it is now.',i2:'The same colours, the strip dark for a while (a preview, not saved).',i3:'The TV turns BLACK on purpose for about 50 s and the strip shows its own red, green, blue at 4 levels (this also teaches the page how your camera sees light).',mQuick:'Quick: 5 colours (about 2 min)',mFull:'Full: 11 colours (about 3.5 min)',
@@ -115,7 +123,7 @@ const T={
   phC:'1 / 3 · The TV plays colours, the strip as it is now',phB:'2 / 3 · The same colours, the strip dark for a while',phA:'3 / 3 · The TV is BLACK on purpose (about 50 s): the strip shows red, green, blue',
   cd:'Starts in %s s – set the phone down and let go',again:'measuring again: ',moved:'Moved – hold still',restore:'Putting everything back…',done:'Done. Press «See the results».',stopped:'Stopped, everything put back.',
   noLock:'This camera cannot lock exposure / white balance.',copied:'Copied.',
-  sumT:'Before (C): TV glow vs bottom, colour difference (smaller = better), at the band and behind it',col:'Colour',diff:'Δ',diff2:'Δ behind',bri:'bottom / TV',okRep:'Repeatable: the band and the line behind it agree.',plRun:'Finding the bands',plOk:'✓ The bands found their place (on the glows, not on the screen); move them if you want.',plManual:'Old firmware: place the bands by hand.',plNoScreen:'✗ The screen was not found: the whole TV must be in the picture.',plNoTop:'No TV glow found above the screen.',plNoBot:'No strip glow found below the screen.',plTopStrip:'The top band also gets strip light.',plBotTv:'The bottom band also gets TV light.',camLine:'Camera response (from the strip): gamma R / G / B %g · white = %a × (red + green + blue) (1 = additive).',noCurve:'No camera curve (the strip part did not run, or old firmware): raw camera values.',badRep:'NOT repeatable: the band and the line behind it disagree (median %s). Move the bands to the middle of the glows, away from corners, and measure again.',retakes:'measured again',unstable:'still unsteady'},
+  sumT:'Before (C): TV glow vs bottom, colour difference (smaller = better), at the band and behind it',col:'Colour',diff:'Δ',diff2:'Δ behind',bri:'bottom / TV',okRep:'Repeatable: the band and the line behind it agree.',plRun:'Finding the bands',tryP:'Try the correction from this run on the strip: a PREVIEW, nothing is saved. «Back» returns to your settings (a restart does too).',tryOn:'Try the correction',tryOff:'Back to now',tryIsOn:'The correction is ON (preview, NOT saved). Cast a colour below and compare; then «Back to now».',tryIsOff:'Back to your settings.',tryPred:'Expected Δ now → with it:',plWallTop:'Too little wall ABOVE the TV in the picture: move the phone back or lower.',plWallBot:'Too little wall BELOW the TV in the picture: move the phone back or higher.',plTopEdge:'The TV glow reaches past the top of the picture.',plBotEdge:'The strip glow reaches past the bottom of the picture.',plOk:'✓ The bands found their place (on the glows, not on the screen); move them if you want.',plManual:'Old firmware: place the bands by hand.',plNoScreen:'✗ The screen was not found: the whole TV must be in the picture.',plNoTop:'No TV glow found above the screen.',plNoBot:'No strip glow found below the screen.',plTopStrip:'The top band also gets strip light.',plBotTv:'The bottom band also gets TV light.',camLine:'Camera response (from the strip): gamma R / G / B %g · white = %a × (red + green + blue) (1 = additive).',noCurve:'No camera curve (the strip part did not run, or old firmware): raw camera values.',badRep:'NOT repeatable: the band and the line behind it disagree (median %s). Move the bands to the middle of the glows, away from corners, and measure again.',retakes:'measured again',unstable:'still unsteady'},
  el:{title:'μέτρηση χρώματος',intro:'Μόνο μέτρηση: βρίσκει πώς φαίνονται πραγματικά η ταινία σου και η TV σου στον τοίχο, για να υπολογιστεί η διόρθωση χρώματος. Δεν αλλάζει τίποτα μόνιμα· στο τέλος όλα είναι όπως πριν. Περίπου 3 λεπτά.',
   i1:'Χρώματα στην TV, η ταινία όπως είναι τώρα.',i2:'Τα ίδια χρώματα, η ταινία σβηστή για λίγο (προεπισκόπηση, δεν αποθηκεύεται).',i3:'Η TV γίνεται ΕΠΙΤΗΔΕΣ μαύρη για περίπου 50 s και η ταινία δείχνει το δικό της κόκκινο, πράσινο, μπλε σε 4 εντάσεις (έτσι η σελίδα μαθαίνει και πώς βλέπει το φως η κάμερά σου).',mQuick:'Γρήγορη: 5 χρώματα (περίπου 2 λεπτά)',mFull:'Πλήρης: 11 χρώματα (περίπου 3,5 λεπτά)',
   conT:'Σύνδεση',conP:'Διεύθυνση του ESP και PIN ρυθμίσεων (το PIN μένει μόνο στη μνήμη της σελίδας, δεν αποθηκεύεται πουθενά).',conGo:'Σύνδεση',
@@ -131,7 +139,7 @@ const T={
   phC:'1 / 3 · Η TV παίζει χρώματα, η ταινία όπως είναι τώρα',phB:'2 / 3 · Τα ίδια χρώματα, η ταινία σβηστή για λίγο',phA:'3 / 3 · Η TV είναι ΕΠΙΤΗΔΕΣ μαύρη (περίπου 50 s): η ταινία δείχνει κόκκινο, πράσινο, μπλε',
   cd:'Ξεκινάει σε %s s – στήσε το κινητό και άφησέ το',again:'ξαναμετράω: ',moved:'Κουνήθηκε – κράτα σταθερά',restore:'Επαναφορά όλων…',done:'Τέλος. Πάτα «Δες τα αποτελέσματα».',stopped:'Διακόπηκε, όλα επανήλθαν.',
   noLock:'Η κάμερα δεν μπορεί να κλειδώσει έκθεση / white balance.',copied:'Αντιγράφηκε.',
-  sumT:'Πριν (C): λάμψη TV vs κάτω, διαφορά χρώματος (μικρότερο = καλύτερα), στη λωρίδα και πίσω της',col:'Χρώμα',diff:'Δ',diff2:'Δ πίσω',bri:'κάτω / TV',okRep:'Επαναλήψιμη: η λωρίδα και η γραμμή πίσω της συμφωνούν.',plRun:'Βρίσκω τις λωρίδες',plOk:'✓ Οι λωρίδες βρήκαν θέση μόνες τους (στις λάμψεις, όχι στην οθόνη)· μετακίνησέ τες αν θέλεις.',plManual:'Παλιό firmware: βάλε τις λωρίδες με το χέρι.',plNoScreen:'✗ Δεν βρέθηκε η οθόνη: να φαίνεται όλη η TV στο κάδρο.',plNoTop:'Δεν βρέθηκε λάμψη TV πάνω από την οθόνη.',plNoBot:'Δεν βρέθηκε λάμψη ταινίας κάτω από την οθόνη.',plTopStrip:'Η πάνω λωρίδα παίρνει και φως από την ταινία.',plBotTv:'Η κάτω λωρίδα παίρνει και φως από την TV.',camLine:'Απόκριση κάμερας (από την ταινία): γάμμα R / G / B %g · λευκό = %a × (κόκκινο + πράσινο + μπλε) (1 = αθροίζονται).',noCurve:'Χωρίς καμπύλη κάμερας (δεν έτρεξε το κομμάτι της ταινίας ή παλιό firmware): ωμές τιμές κάμερας.',badRep:'ΟΧΙ επαναλήψιμη: η λωρίδα και η γραμμή πίσω της διαφωνούν (διάμεσος %s). Βάλε τις λωρίδες στη μέση των λάμψεων, μακριά από γωνίες, και ξαναμέτρησε.',retakes:'ξαναμετρήθηκαν',unstable:'ακόμα ασταθή'}};
+  sumT:'Πριν (C): λάμψη TV vs κάτω, διαφορά χρώματος (μικρότερο = καλύτερα), στη λωρίδα και πίσω της',col:'Χρώμα',diff:'Δ',diff2:'Δ πίσω',bri:'κάτω / TV',okRep:'Επαναλήψιμη: η λωρίδα και η γραμμή πίσω της συμφωνούν.',plRun:'Βρίσκω τις λωρίδες',tryP:'Δοκίμασε τη διόρθωση αυτής της μέτρησης στην ταινία: ΠΡΟΕΠΙΣΚΟΠΗΣΗ, δεν αποθηκεύεται τίποτα. Το «Πίσω» γυρίζει στις ρυθμίσεις σου (το ίδιο και ένα restart).',tryOn:'Δοκίμασε τη διόρθωση',tryOff:'Πίσω στο τωρινό',tryIsOn:'Η διόρθωση ΠΑΙΖΕΙ (προεπισκόπηση, ΔΕΝ αποθηκεύτηκε). Ρίξε ένα χρώμα από κάτω και σύγκρινε· μετά «Πίσω στο τωρινό».',tryIsOff:'Πίσω στις ρυθμίσεις σου.',tryPred:'Αναμενόμενο Δ τώρα → με τη διόρθωση:',plWallTop:'Λίγος τοίχος ΠΑΝΩ από την TV στο κάδρο: πήγαινε πιο πίσω ή πιο χαμηλά με το κινητό.',plWallBot:'Λίγος τοίχος ΚΑΤΩ από την TV στο κάδρο: πήγαινε πιο πίσω ή πιο ψηλά με το κινητό.',plTopEdge:'Η λάμψη της TV βγαίνει έξω από την εικόνα, πάνω.',plBotEdge:'Η λάμψη της ταινίας βγαίνει έξω από την εικόνα, κάτω.',plOk:'✓ Οι λωρίδες βρήκαν θέση μόνες τους (στις λάμψεις, όχι στην οθόνη)· μετακίνησέ τες αν θέλεις.',plManual:'Παλιό firmware: βάλε τις λωρίδες με το χέρι.',plNoScreen:'✗ Δεν βρέθηκε η οθόνη: να φαίνεται όλη η TV στο κάδρο.',plNoTop:'Δεν βρέθηκε λάμψη TV πάνω από την οθόνη.',plNoBot:'Δεν βρέθηκε λάμψη ταινίας κάτω από την οθόνη.',plTopStrip:'Η πάνω λωρίδα παίρνει και φως από την ταινία.',plBotTv:'Η κάτω λωρίδα παίρνει και φως από την TV.',camLine:'Απόκριση κάμερας (από την ταινία): γάμμα R / G / B %g · λευκό = %a × (κόκκινο + πράσινο + μπλε) (1 = αθροίζονται).',noCurve:'Χωρίς καμπύλη κάμερας (δεν έτρεξε το κομμάτι της ταινίας ή παλιό firmware): ωμές τιμές κάμερας.',badRep:'ΟΧΙ επαναλήψιμη: η λωρίδα και η γραμμή πίσω της διαφωνούν (διάμεσος %s). Βάλε τις λωρίδες στη μέση των λάμψεων, μακριά από γωνίες, και ξαναμέτρησε.',retakes:'ξαναμετρήθηκαν',unstable:'ακόμα ασταθή'}};
 const $=id=>document.getElementById(id);
 const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 let L=store.get('ab_lang')||((navigator.language||'').toLowerCase().startsWith('el')?'el':'en');
@@ -213,6 +221,7 @@ $('mmOpen').onclick=async()=>{
   locked=false;setGo('lock');mm('',t('mDrag'),0);};
 $('mmX').onclick=async()=>{if(running){abort=true;await putBack();}closeMM();};
 function closeMM(){$('mm').classList.remove('on');try{if(document.fullscreenElement)document.exitFullscreen();}catch(e){}try{wakeLock&&wakeLock.release();}catch(e){}wakeLock=null;}
+$('mmGo').addEventListener('click',()=>{if(goState==='start')showPlace(null);});
 $('mmGo').onclick=()=>{const f={lock:doLock,start:run,stop:stopRun,done:()=>{closeMM();$('sum').scrollIntoView();}}[goState];if(f)f();};
 // the lock: white on the TV, let the camera settle, lock, then darker until nothing clips
 async function doLock(){
@@ -242,6 +251,9 @@ async function doLock(){
 // fallen to half its peak (going away from the screen); bottom band: below the screen, where the strip's glow has
 // fallen to half. Both span the middle half of the screen's width. Check: top lit by the TV not the strip, bottom
 // by the strip not the TV, neither on the screen.
+let placeRect=null;
+function showPlace(ok,txt){const e=$('mmPlace');if(ok===null){e.style.display='none';return;}e.className=ok?'ok':'bad';e.textContent=(ok?'✓ ':'✗ ')+txt;e.style.display='block';
+  clearTimeout(showPlace.tm);if(ok)showPlace.tm=setTimeout(()=>{e.style.display='none';},8000);}
 async function grabLum(n){const v=$('vid'),W=160,H=Math.max(1,Math.round(160*v.videoHeight/Math.max(1,v.videoWidth))),cv=$('cv');
   cv.width=W;cv.height=H;const x=cv.getContext('2d',{willReadFrequently:true}),acc=new Float32Array(W*H);
   for(let k=0;k<n;k++){x.drawImage(v,0,0,W,H);const d=x.getImageData(0,0,W,H).data;
@@ -249,6 +261,7 @@ async function grabLum(n){const v=$('vid'),W=160,H=Math.max(1,Math.round(160*v.v
   for(let j=0;j<acc.length;j++)acc[j]/=n;return {W,H,a:acc};}
 async function autoPlace(){
   const tc=o=>ambiPost('/test_colour',{...o,ms:20000});
+  placeRect=null;showPlace(null);
   try{await unlock();await tc({r:0,g:0,b:0});}catch(e){data.place={ok:false,why:'no test_colour'};return t('plManual');}
   const res={ok:false};
   try{
@@ -258,27 +271,38 @@ async function autoPlace(){
     mm(undefined,t('plRun')+' 4/4');await castImage('frame_white.png');await wait(4000);const FA=await grabLum(5);
     const {W,H}=F0,dif=(F)=>F.a.map((v,i)=>Math.max(0,v-F0.a[i]));const dS=dif(FS),dC=dif(FC),dA=dif(FA);
     // the screen: the bright centre (> 30 % of its 99th percentile), widened by the 20 % frames (centre = 60 %)
-    const sorted=Float32Array.from(dC).sort(),p99=sorted[Math.floor(sorted.length*0.99)];
-    let x0=W,y0=H,x1=-1,y1=-1;
-    if(p99>0.01)for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(dC[y*W+x]>0.3*p99){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}
-    if(x1<0){res.why='screen not found';data.place=res;return t('plNoScreen');}
-    const mx=(x1-x0+1)/3,my=(y1-y0+1)/3;const sx0=Math.max(0,x0-mx),sx1=Math.min(W-1,x1+mx),sy0=Math.max(0,y0-my),sy1=Math.min(H-1,y1+my);
+    // v0.10: the screen = bright with the white centre OR very bright with the white frame (the screen's own border is
+    // far brighter than its glow on the wall); no more «widen the centre by its frames» (v0.9: the box grew over the
+    // strip's glow). Rows / columns with at least 20 % screen pixels, the longest run of them.
+    const p99=A=>{const q=Float32Array.from(A).sort();return q[Math.floor(q.length*0.99)];},pc=p99(dC),pa=p99(dA);
+    if(pc<0.01){res.why='screen not found';data.place=res;return t('plNoScreen');}
+    const scr=new Uint8Array(W*H);for(let i=0;i<W*H;i++)scr[i]=(dC[i]>0.3*pc||dA[i]>0.6*pa)?1:0;
+    const run=(n,frac)=>{let best=[-1,-2],cur=-1;for(let i=0;i<=n;i++){const on=i<n&&frac(i)>=0.2;if(on&&cur<0)cur=i;if(!on&&cur>=0){if(i-1-cur>best[1]-best[0])best=[cur,i-1];cur=-1;}}return best;};
+    const [sy0,sy1]=run(H,y=>{let c=0;for(let x=0;x<W;x++)c+=scr[y*W+x];return c/W;});
+    if(sy1<sy0){res.why='screen not found';data.place=res;return t('plNoScreen');}
+    const [sx0,sx1]=run(W,x=>{let c=0;for(let y=sy0;y<=sy1;y++)c+=scr[y*W+x];return c/(sy1-sy0+1);});
+    placeRect={x:sx0/W,y:sy0/H,w:(sx1-sx0+1)/W,h:(sy1-sy0+1)/H};
     res.screen={x0:+(sx0/W).toFixed(3),y0:+(sy0/H).toFixed(3),x1:+(sx1/W).toFixed(3),y1:+(sy1/H).toFixed(3)};
     const cx0=Math.round(sx0+(sx1-sx0)*0.25),cx1=Math.round(sx0+(sx1-sx0)*0.75);
     const row=(D,y)=>{let s=0;for(let x=cx0;x<=cx1;x++)s+=D[y*W+x];return s/(cx1-cx0+1);};
     // walk away from the screen: find the glow's peak, then the first row where it has fallen to half
     const half=(D,from,step,stop)=>{let pk=0,py=-1;for(let y=from;y!==stop;y+=step){const v=row(D,y);if(v>pk){pk=v;py=y;}}
-      if(py<0||pk<0.002)return null;for(let y=py;y!==stop;y+=step)if(row(D,y)<=0.5*pk)return {y,peak:pk};return {y:stop-step,peak:pk};};
+      if(py<0||pk<0.002)return null;for(let y=py;y!==stop;y+=step)if(row(D,y)<=0.5*pk)return {y,peak:pk};return {y:stop-step,peak:pk,edge:true};};
     const top=half(dA,Math.floor(sy0)-1,-1,-1),bot=half(dS,Math.ceil(sy1)+1,1,H);
     const bw=Math.max(0.15,(cx1-cx0+1)/W),bh=0.05,bx=Math.max(0,Math.min(1-bw,cx0/W));
     const msgs=[];
+    // v0.10: enough wall above / below the screen in the picture (at least 8 % of the height), and the glow's half
+    // point inside the picture
+    if(sy0<0.08*H)msgs.push(t('plWallTop'));if(H-1-sy1<0.08*H)msgs.push(t('plWallBot'));
+    if(top&&top.edge)msgs.push(t('plTopEdge'));if(bot&&bot.edge)msgs.push(t('plBotEdge'));
     if(top){box.S={x:bx,y:Math.max(0,Math.min(1-bh,top.y/H-bh/2)),w:bw,h:bh};const tv=row(dA,top.y),st=row(dS,top.y);res.top={y:+(top.y/H).toFixed(3),tv:+tv.toFixed(4),strip:+st.toFixed(4)};
       if(st>0.3*tv)msgs.push(t('plTopStrip'));}else msgs.push(t('plNoTop'));
     if(bot){box.B={x:bx,y:Math.max(0,Math.min(1-bh,bot.y/H-bh/2)),w:bw,h:bh};const st=row(dS,bot.y),tv=row(dA,bot.y);res.bottom={y:+(bot.y/H).toFixed(3),strip:+st.toFixed(4),tv:+tv.toFixed(4)};
       if(tv>0.3*st)msgs.push(t('plBotTv'));}else msgs.push(t('plNoBot'));
     res.ok=!msgs.length;data.place=res;
+    showPlace(res.ok,res.ok?t('plOk'):msgs.join(' '));
     return res.ok?t('plOk'):'✗ '+msgs.join(' ');
-  }catch(e){res.why=String(e);data.place=res;return '✗ '+e;}
+  }catch(e){res.why=String(e);data.place=res;showPlace(false,String(e));return '✗ '+e;}
   finally{try{await unlock();await ambiPost('/test_colour',{off:true});}catch(e){}try{await castImage('frame_white.png');}catch(e){}}}
 // dragging: the nearest box follows the finger (not while measuring)
 const ov=$('ov');let drag=null;
@@ -303,6 +327,7 @@ function loop(){
   const d=x.getImageData(0,0,W,H).data;live.S=band(d,W,H,box.S);live.B=band(d,W,H,box.B);live.S2=meanBox(d,W,H,far('S'));live.B2=meanBox(d,W,H,far('B'));
   if(collect)collect.push({t:performance.now(),S:live.S,B:live.B,S2:live.S2,B2:live.B2});
   ov.width=ov.clientWidth;ov.height=ov.clientHeight;const o=ov.getContext('2d');o.clearRect(0,0,ov.width,ov.height);o.lineWidth=3;o.font='bold 15px system-ui';
+  if(placeRect){o.strokeStyle='rgba(255,255,255,.8)';o.setLineDash([4,4]);o.lineWidth=2;o.strokeRect(placeRect.x*ov.width,placeRect.y*ov.height,placeRect.w*ov.width,placeRect.h*ov.height);}
   for(const k in box){const b=box[k],f=far(k);o.strokeStyle=k==='S'?'#70d8cc':'#e0b040';o.setLineDash([8,5]);o.lineWidth=3;o.strokeRect(b.x*ov.width,b.y*ov.height,b.w*ov.width,b.h*ov.height);
     o.setLineDash([2,6]);o.lineWidth=1.5;o.strokeRect(f.x*ov.width,f.y*ov.height,f.w*ov.width,f.h*ov.height);o.fillStyle=o.strokeStyle;o.fillText(k==='S'?'TV':'B',b.x*ov.width+5,b.y*ov.height+17);}
   const f=s=>s&&s.m?s.m.map(v=>v.toFixed(3)).join('/')+(s.clip>0.005?' ⚠'+Math.round(s.clip*100)+'%':''):'–';
@@ -341,8 +366,8 @@ async function phaseStrip(p0,p1){
   data.A_mode=useTest?'test_colour (raw PWM)':'wled solid colour (WLED gamma 2.8)';
   if(!useTest){wledSaved=await espGet('/json/state');await unlock();await ambiPost('/service',{action:'stop'});await wait(2000);}
   const seq=useTest
-    ?[['off',0,0,0],['r32',32,0,0],['r64',64,0,0],['r128',128,0,0],['r224',224,0,0],['g32',0,32,0],['g64',0,64,0],['g128',0,128,0],['g224',0,224,0],
-      ['b32',0,0,32],['b64',0,0,64],['b128',0,0,128],['b224',0,0,224],['w64',64,64,64],['off2',0,0,0]]
+    ?[['off',0,0,0],['r24',24,0,0],['r48',48,0,0],['r96',96,0,0],['r160',160,0,0],['g24',0,24,0],['g48',0,48,0],['g96',0,96,0],['g160',0,160,0],
+      ['b24',0,0,24],['b48',0,0,48],['b96',0,0,96],['b160',0,0,160],['w48',48,48,48],['off2',0,0,0]]
     :[['off',0,0,0],['r96',96,0,0],['g96',0,96,0],['b96',0,0,96],['w96',96,96,96],['r192',192,0,0],['g192',0,192,0],['b192',0,0,192],['off2',0,0,0]];
   for(let i=0;i<seq.length&&!abort;i++){const [n,r,g,b]=seq[i];
     if(useTest)await ambiPost('/test_colour',{r,g,b,ms:15000});
@@ -409,6 +434,7 @@ async function run(){
   running=false;$('dl').disabled=$('cp').disabled=false;$('runRes').textContent=abort?t('stopped'):'';}
 async function stopRun(){abort=true;setGo('busy');await putBack();}
 window.addEventListener('pagehide',()=>{if(!ESP)return;const b=(p,o)=>{try{navigator.sendBeacon(ESP+'/ambi/api'+p,JSON.stringify(o));}catch(e){}};
+  if(tryOn&&saved)b('/settings/strip',{...saved});
   if(phaseA)b(useTest?'/test_colour':'/service',useTest?{off:true}:{action:'start'});if(previewOn&&saved)b('/settings/strip',{...saved});});
 function chroma(m){const s=m[0]+m[1]+m[2]||1;return [m[0]/s,m[1]/s];}
 // v0.8: the camera's response, learnt from the strip's ramp (the strip's PWM is linear light): v - black = a * p^g per
@@ -419,7 +445,7 @@ function camCurve(){
   const off=data.A.find(a=>a.name==='off');if(!off||!off.B||!off.B.m)return null;
   const cur=[];
   for(let c=0;c<3;c++){
-    const pts=data.A.filter(a=>/^[rgb]\d+$/.test(a.name)&&a.name[0]==='rgb'[c]&&a.B&&a.B.m).map(a=>[a.pwm[c]/255,a.B.m[c]-off.B.m[c]]).filter(([q,v])=>q>0&&v>0);
+    const pts=data.A.filter(a=>/^[rgb]\d+$/.test(a.name)&&a.name[0]==='rgb'[c]&&a.B&&a.B.m&&!(a.B.clip>0.01)).map(a=>[a.pwm[c]/255,a.B.m[c]-off.B.m[c]]).filter(([q,v])=>q>0&&v>0);
     if(pts.length<3)return null;
     const xs=pts.map(([q])=>Math.log(q)),ys=pts.map(([,v])=>Math.log(v)),n=xs.length,mx=xs.reduce((a,b)=>a+b)/n,my=ys.reduce((a,b)=>a+b)/n;
     let sxy=0,sxx=0;for(let k=0;k<n;k++){sxy+=(xs[k]-mx)*(ys[k]-my);sxx+=(xs[k]-mx)**2;}
@@ -427,10 +453,57 @@ function camCurve(){
   return {curve:cur,black:off.B.m};}
 // camera value -> linear light (strip-PWM units 0..1); without a curve: the value as it is
 function linz(m,cc){if(!m)return null;if(!cc)return m.slice();return m.map((v,c)=>{const x=v-cc.black[c];return x>0?Math.pow(x/cc.curve[c].a,1/cc.curve[c].g):0;});}
+// ---- v0.10 (user: «βάλε τη διόρθωση αλλά όχι μόνιμα, για να δω τη διαφορά»): a colour matrix from this run, shown
+// as a PREVIEW (cm_on + cm, never saved); «Back» = a normal POST of the saved values (the firmware restores the
+// saved matrix too). The ESP's own colour path, ported: xy + bri -> Wide Gamut RGB -> sRGB 8 bit -> linear.
+function xyLin(x,y,bri){if(!(y>0))return [0,0,0];const Yv=Math.max(0,Math.min(1,bri/254)),X=Yv/y*x,Z=Yv/y*(1-x-y);
+  const r=X*1.656492-Yv*0.354851-Z*0.255038,g=-X*0.707196+Yv*1.655397+Z*0.036152,b=X*0.051713-Yv*0.121364+Z*1.011530;
+  const gm=c=>{c=Math.max(0,c);return c<=0.0031308?12.92*c:1.055*Math.pow(c,1/2.4)-0.055;};const v=[gm(r),gm(g),gm(b)],m=Math.max(...v,1);
+  return v.map(c=>{const i=Math.round(255*c/m)/255;return i<=0.04045?i/12.92:Math.pow((i+0.055)/1.055,2.4);});}
+function solve3(A,b){const M=A.map((r,i)=>[...r,b[i]]);for(let c=0;c<3;c++){let p=c;for(let r=c+1;r<3;r++)if(Math.abs(M[r][c])>Math.abs(M[p][c]))p=r;[M[c],M[p]]=[M[p],M[c]];
+  if(Math.abs(M[c][c])<1e-12)return null;for(let r=0;r<3;r++)if(r!==c){const f=M[r][c]/M[c][c];for(let k=c;k<4;k++)M[r][k]-=f*M[c][k];}}return [0,1,2].map(i=>M[i][3]/M[i][i]);}
+function fitCm(){
+  const cc=camCurve();if(!cc||!saved)return null;
+  const g=n=>{const a=data.A.find(x=>x.name===n);return a&&a.B&&linz(a.B.m,cc);},off=g('off');if(!off)return null;
+  // the strip on the wall, per unit PWM (columns = strip R / G / B), from the 96 step of the ramp
+  const col=c=>{const v=g('rgb'[c]+'96');return v&&v.map((x,k)=>Math.max(0,x-off[k])/(96/255));},Acols=[col(0),col(1),col(2)];if(Acols.some(c=>!c))return null;
+  const A=[0,1,2].map(r=>[Acols[0][r],Acols[1][r],Acols[2][r]]);
+  const Yl=m=>0.2126*m[0]+0.7152*m[1]+0.0722*m[2],rows=[];
+  data.C.forEach((c,i)=>{const b=data.B[i];if(!b||!b.S||!c.B||!b.B)return;
+    const L=(b.esp||[]).flatMap(e=>(e.lamps||[]).filter(l=>l.xy)).slice(-6);if(!L.length)return;
+    const x=L.reduce((a,l)=>a+l.xy[0],0)/L.length,y=L.reduce((a,l)=>a+l.xy[1],0)/L.length,bri=L.reduce((a,l)=>a+l.bri8,0)/L.length;
+    const S=linz(b.S.m,cc),Bn=linz(c.B.m,cc).map((v,k)=>Math.max(0,v-linz(b.B.m,cc)[k]));rows.push({name:c.name,rl:xyLin(x,y,bri),S,Bn});});
+  const w=rows.find(r=>r.name==='white');if(!w||rows.length<4)return null;
+  const k=Yl(w.Bn)/(Yl(w.S)||1);  // the white stays as bright as now: only the colours move
+  const bgt=Math.max(0.05,saved.brightness);
+  rows.forEach(r=>{const p=solve3(A,r.S.map(v=>k*v));r.target=p?p.map(v=>Math.max(0,v)/bgt):null;});
+  // least squares per output row, pulled gently toward the white balance in force now (ridge)
+  const m0=[[saved.wb_r,0,0],[0,saved.wb_g,0],[0,0,saved.wb_b]],ok=rows.filter(r=>r.target),cm=[];
+  let tr=0;ok.forEach(r=>tr+=r.rl.reduce((a,v)=>a+v*v,0));const lam=0.05*tr/3;
+  for(let o=0;o<3;o++){const N=[[lam,0,0],[0,lam,0],[0,0,lam]],v=[lam*m0[o][0],lam*m0[o][1],lam*m0[o][2]];
+    ok.forEach(r=>{for(let a=0;a<3;a++){v[a]+=r.rl[a]*r.target[o];for(let c=0;c<3;c++)N[a][c]+=r.rl[a]*r.rl[c];}});
+    const m=solve3(N,v);if(!m)return null;cm.push(...m.map(x=>Math.max(-2,Math.min(2,+x.toFixed(4)))));}
+  // what the camera should see with it (the same model), for the table
+  const pred=ok.map(r=>{let o=[0,1,2].map(i=>Math.max(0,cm[3*i]*r.rl[0]+cm[3*i+1]*r.rl[1]+cm[3*i+2]*r.rl[2]));const mx=Math.max(...o);if(mx>1)o=o.map(v=>v/mx);
+    const B=[0,1,2].map(i=>A[i][0]*o[0]*bgt+A[i][1]*o[1]*bgt+A[i][2]*o[2]*bgt);const d=(p,q)=>{const a=chroma(p),b=chroma(q);return 100*Math.hypot(a[0]-b[0],a[1]-b[1]);};
+    return {name:r.name,now:+d(r.S,r.Bn).toFixed(1),after:+d(r.S,B).toFixed(1)};});
+  return {cm,k:+k.toFixed(3),pred};}
+let tryOn=false,tryFit=null;
+async function setTry(on){const out=$('tryRes');
+  try{await unlock();
+    if(on){await ambiPost('/settings/strip',{preview:true,cm_on:true,cm:tryFit.cm});tryOn=true;}
+    else{await ambiPost('/settings/strip',{...saved});tryOn=false;}
+    $('tryOn').disabled=tryOn;$('tryOff').disabled=!tryOn;out.className='res '+(tryOn?'warn':'ok');out.textContent=tryOn?t('tryIsOn'):t('tryIsOff');
+  }catch(e){out.className='res bad';out.textContent='✗ '+e;}}
+$('tryOn').onclick=()=>setTry(true);$('tryOff').onclick=()=>setTry(false);
+function showTry(){const box=$('tryBox');tryFit=fitCm();data.try_fit=tryFit;if(!tryFit){box.style.display='none';return;}box.style.display='block';
+  const tp=$('tryPats');tp.innerHTML='';COLS.forEach(([n,c])=>{const b=document.createElement('button');b.className='btn';b.style.padding='8px 10px';
+    b.innerHTML='<span class="sw" style="background:'+c+'"></span>'+n;b.onclick=()=>{if(sess())castImage((n==='grey50'?'grey128':n)+'.png').catch(()=>{});};tp.appendChild(b);});
+  $('tryRes').className='res mut';$('tryRes').textContent=t('tryPred')+' '+tryFit.pred.map(p=>p.name+' '+p.now+' → '+p.after).join(' · ');}
 function summary(){
   const nRe=['A','B','C'].reduce((a,k)=>a+data[k].filter(r=>r.tries).length,0),nBad=['B','C'].reduce((a,k)=>a+data[k].filter(r=>r.unsteady).length,0);
   const cc=camCurve();data.cam=cc?{curve:cc.curve}:null;
-  if(cc){const g=n=>{const a=data.A.find(x=>x.name===n);return a&&a.B&&linz(a.B.m,cc);},w=g('w64'),r=g('r64'),gg=g('g64'),b=g('b64');
+  if(cc){const g=n=>{const a=data.A.find(x=>x.name===n);return a&&a.B&&linz(a.B.m,cc);},w=g('w48'),r=g('r48'),gg=g('g48'),b=g('b48');
     if(w&&r&&gg&&b)data.cam.additivity=[0,1,2].map(c=>+(w[c]/((r[c]+gg[c]+b[c])||1)).toFixed(2));}
   // v0.8: the TV glow is taken from phase B (strip dark: no strip light / lens flare in it), the bottom from phase C
   // minus phase B's bottom (the TV's own light that reaches the bottom band)
@@ -448,7 +521,7 @@ function summary(){
   const verdict=med===null?'':med<2.5?'<p class="ok" style="margin:8px 0 0">'+t('okRep')+'</p>':'<p class="bad" style="margin:8px 0 0">'+t('badRep').replace('%s',med.toFixed(1))+'</p>';
   const camTxt=cc?'<p class="mut" style="margin:8px 0 0">'+t('camLine').replace('%g',cc.curve.map(c=>c.g.toFixed(2)).join(' / ')).replace('%a',data.cam.additivity?data.cam.additivity.join(' / '):'–')+'</p>':'<p class="warn" style="margin:8px 0 0">'+t('noCurve')+'</p>';
   $('sum').innerHTML=h+'</table>'+verdict+camTxt+'<p class="mut" style="margin:8px 0 0">'+t('retakes')+': '+nRe+' · '+t('unstable')+': '+nBad+'</p>';
-  $('runRes').className='res ok';$('runRes').textContent=t('done').split('.')[0]+'.';}
+  $('runRes').className='res ok';$('runRes').textContent=t('done').split('.')[0]+'.';showTry();}
 $('dl').onclick=()=>{const b=new Blob([JSON.stringify(data,null,1)],{type:'application/json'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='ambibottom-measure-'+(data.started||'').replace(/[:.]/g,'-')+'.json';a.click();};
 $('cp').onclick=async()=>{try{await navigator.clipboard.writeText(JSON.stringify(data));$('runRes').textContent=t('copied');}catch(e){$('runRes').textContent='✗ '+e;}};
 lang(L);
