@@ -98,7 +98,7 @@ ol{margin:6px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
 </div>
 <canvas id="cv" style="display:none"></canvas>
 <script>
-const PAGE_VERSION='0.8';
+const PAGE_VERSION='0.9';
 const T={
  en:{title:'colour measurement',intro:'Measurement only: it finds out how your strip and your TV really look on your wall, so the colour correction can be computed. Nothing is changed for good; at the end everything is as before. About 3 minutes.',
   i1:'Colours on the TV, the strip as it is now.',i2:'The same colours, the strip dark for a while (a preview, not saved).',i3:'The TV turns BLACK on purpose for about 50 s and the strip shows its own red, green, blue at 4 levels (this also teaches the page how your camera sees light).',mQuick:'Quick: 5 colours (about 2 min)',mFull:'Full: 11 colours (about 3.5 min)',
@@ -109,13 +109,13 @@ const T={
   dl:'Download data',cp:'Copy data',foot:'AmbiBottom companion · measurement prototype · nothing leaves your browser',
   need:'First connect (1) and Cast (2).',okCon:'Connected: ',badPin:'PIN not accepted (or wrong).',
   gLock:'Lock',gStart:'Start',gStop:'Stop',gDone:'See the results',
-  mDrag:'Drag the two bands onto the WALL only (never on the TV, the LEDs or furniture): TV = the glow ABOVE the TV, B = the glow below, both in the middle (away from the corners), about a hand above the TV / below the strip. The thin line behind each band is measured too. Then Lock.',
+  mDrag:'Keep the whole TV and the wall above and below it in the picture, then press Lock: the page finds the bands itself (about 20 s).',
   mLocking:'Locking: the TV shows white, the camera settles…',mDark:'Darker, something was too bright…',
   mReady:'Locked. Keep the phone still and press Start.',mClip:'Still too bright here: move a box off the brightest spot.',
   phC:'1 / 3 · The TV plays colours, the strip as it is now',phB:'2 / 3 · The same colours, the strip dark for a while',phA:'3 / 3 · The TV is BLACK on purpose (about 50 s): the strip shows red, green, blue',
   cd:'Starts in %s s – set the phone down and let go',again:'measuring again: ',moved:'Moved – hold still',restore:'Putting everything back…',done:'Done. Press «See the results».',stopped:'Stopped, everything put back.',
   noLock:'This camera cannot lock exposure / white balance.',copied:'Copied.',
-  sumT:'Before (C): TV glow vs bottom, colour difference (smaller = better), at the band and behind it',col:'Colour',diff:'Δ',diff2:'Δ behind',bri:'bottom / TV',okRep:'Repeatable: the band and the line behind it agree.',camLine:'Camera response (from the strip): gamma R / G / B %g · white = %a × (red + green + blue) (1 = additive).',noCurve:'No camera curve (the strip part did not run, or old firmware): raw camera values.',badRep:'NOT repeatable: the band and the line behind it disagree (median %s). Move the bands to the middle of the glows, away from corners, and measure again.',retakes:'measured again',unstable:'still unsteady'},
+  sumT:'Before (C): TV glow vs bottom, colour difference (smaller = better), at the band and behind it',col:'Colour',diff:'Δ',diff2:'Δ behind',bri:'bottom / TV',okRep:'Repeatable: the band and the line behind it agree.',plRun:'Finding the bands',plOk:'✓ The bands found their place (on the glows, not on the screen); move them if you want.',plManual:'Old firmware: place the bands by hand.',plNoScreen:'✗ The screen was not found: the whole TV must be in the picture.',plNoTop:'No TV glow found above the screen.',plNoBot:'No strip glow found below the screen.',plTopStrip:'The top band also gets strip light.',plBotTv:'The bottom band also gets TV light.',camLine:'Camera response (from the strip): gamma R / G / B %g · white = %a × (red + green + blue) (1 = additive).',noCurve:'No camera curve (the strip part did not run, or old firmware): raw camera values.',badRep:'NOT repeatable: the band and the line behind it disagree (median %s). Move the bands to the middle of the glows, away from corners, and measure again.',retakes:'measured again',unstable:'still unsteady'},
  el:{title:'μέτρηση χρώματος',intro:'Μόνο μέτρηση: βρίσκει πώς φαίνονται πραγματικά η ταινία σου και η TV σου στον τοίχο, για να υπολογιστεί η διόρθωση χρώματος. Δεν αλλάζει τίποτα μόνιμα· στο τέλος όλα είναι όπως πριν. Περίπου 3 λεπτά.',
   i1:'Χρώματα στην TV, η ταινία όπως είναι τώρα.',i2:'Τα ίδια χρώματα, η ταινία σβηστή για λίγο (προεπισκόπηση, δεν αποθηκεύεται).',i3:'Η TV γίνεται ΕΠΙΤΗΔΕΣ μαύρη για περίπου 50 s και η ταινία δείχνει το δικό της κόκκινο, πράσινο, μπλε σε 4 εντάσεις (έτσι η σελίδα μαθαίνει και πώς βλέπει το φως η κάμερά σου).',mQuick:'Γρήγορη: 5 χρώματα (περίπου 2 λεπτά)',mFull:'Πλήρης: 11 χρώματα (περίπου 3,5 λεπτά)',
   conT:'Σύνδεση',conP:'Διεύθυνση του ESP και PIN ρυθμίσεων (το PIN μένει μόνο στη μνήμη της σελίδας, δεν αποθηκεύεται πουθενά).',conGo:'Σύνδεση',
@@ -125,13 +125,13 @@ const T={
   dl:'Λήψη δεδομένων',cp:'Αντιγραφή δεδομένων',foot:'AmbiBottom companion · πρωτότυπο μέτρησης · κανένα δεδομένο δεν φεύγει από τον browser',
   need:'Πρώτα σύνδεση (1) και Cast (2).',okCon:'Συνδέθηκε: ',badPin:'Το PIN δεν έγινε δεκτό (ή είναι λάθος).',
   gLock:'Κλείδωμα',gStart:'Έναρξη',gStop:'Διακοπή',gDone:'Δες τα αποτελέσματα',
-  mDrag:'Σύρε τις δύο λωρίδες ΜΟΝΟ πάνω στον τοίχο (ποτέ στην TV, στα LED ή σε έπιπλα): TV = η λάμψη ΠΑΝΩ από την TV, B = η λάμψη από κάτω, και οι δύο στη μέση (μακριά από τις γωνίες), περίπου μία παλάμη πάνω από την TV / κάτω από την ταινία. Μετριέται και η λεπτή γραμμή πίσω από κάθε λωρίδα. Μετά Κλείδωμα.',
+  mDrag:'Να φαίνεται όλη η TV και ο τοίχος πάνω και κάτω της, και πάτα Κλείδωμα: η σελίδα βρίσκει μόνη της τις λωρίδες (περίπου 20 s).',
   mLocking:'Κλείδωμα: η TV δείχνει λευκό, η κάμερα ηρεμεί…',mDark:'Πιο σκοτεινά, κάτι ήταν πολύ φωτεινό…',
   mReady:'Κλειδώθηκε. Κράτα το κινητό ακίνητο και πάτα Έναρξη.',mClip:'Ακόμα πολύ φωτεινό εδώ: μετακίνησε το κουτάκι από το πιο φωτεινό σημείο.',
   phC:'1 / 3 · Η TV παίζει χρώματα, η ταινία όπως είναι τώρα',phB:'2 / 3 · Τα ίδια χρώματα, η ταινία σβηστή για λίγο',phA:'3 / 3 · Η TV είναι ΕΠΙΤΗΔΕΣ μαύρη (περίπου 50 s): η ταινία δείχνει κόκκινο, πράσινο, μπλε',
   cd:'Ξεκινάει σε %s s – στήσε το κινητό και άφησέ το',again:'ξαναμετράω: ',moved:'Κουνήθηκε – κράτα σταθερά',restore:'Επαναφορά όλων…',done:'Τέλος. Πάτα «Δες τα αποτελέσματα».',stopped:'Διακόπηκε, όλα επανήλθαν.',
   noLock:'Η κάμερα δεν μπορεί να κλειδώσει έκθεση / white balance.',copied:'Αντιγράφηκε.',
-  sumT:'Πριν (C): λάμψη TV vs κάτω, διαφορά χρώματος (μικρότερο = καλύτερα), στη λωρίδα και πίσω της',col:'Χρώμα',diff:'Δ',diff2:'Δ πίσω',bri:'κάτω / TV',okRep:'Επαναλήψιμη: η λωρίδα και η γραμμή πίσω της συμφωνούν.',camLine:'Απόκριση κάμερας (από την ταινία): γάμμα R / G / B %g · λευκό = %a × (κόκκινο + πράσινο + μπλε) (1 = αθροίζονται).',noCurve:'Χωρίς καμπύλη κάμερας (δεν έτρεξε το κομμάτι της ταινίας ή παλιό firmware): ωμές τιμές κάμερας.',badRep:'ΟΧΙ επαναλήψιμη: η λωρίδα και η γραμμή πίσω της διαφωνούν (διάμεσος %s). Βάλε τις λωρίδες στη μέση των λάμψεων, μακριά από γωνίες, και ξαναμέτρησε.',retakes:'ξαναμετρήθηκαν',unstable:'ακόμα ασταθή'}};
+  sumT:'Πριν (C): λάμψη TV vs κάτω, διαφορά χρώματος (μικρότερο = καλύτερα), στη λωρίδα και πίσω της',col:'Χρώμα',diff:'Δ',diff2:'Δ πίσω',bri:'κάτω / TV',okRep:'Επαναλήψιμη: η λωρίδα και η γραμμή πίσω της συμφωνούν.',plRun:'Βρίσκω τις λωρίδες',plOk:'✓ Οι λωρίδες βρήκαν θέση μόνες τους (στις λάμψεις, όχι στην οθόνη)· μετακίνησέ τες αν θέλεις.',plManual:'Παλιό firmware: βάλε τις λωρίδες με το χέρι.',plNoScreen:'✗ Δεν βρέθηκε η οθόνη: να φαίνεται όλη η TV στο κάδρο.',plNoTop:'Δεν βρέθηκε λάμψη TV πάνω από την οθόνη.',plNoBot:'Δεν βρέθηκε λάμψη ταινίας κάτω από την οθόνη.',plTopStrip:'Η πάνω λωρίδα παίρνει και φως από την ταινία.',plBotTv:'Η κάτω λωρίδα παίρνει και φως από την TV.',camLine:'Απόκριση κάμερας (από την ταινία): γάμμα R / G / B %g · λευκό = %a × (κόκκινο + πράσινο + μπλε) (1 = αθροίζονται).',noCurve:'Χωρίς καμπύλη κάμερας (δεν έτρεξε το κομμάτι της ταινίας ή παλιό firmware): ωμές τιμές κάμερας.',badRep:'ΟΧΙ επαναλήψιμη: η λωρίδα και η γραμμή πίσω της διαφωνούν (διάμεσος %s). Βάλε τις λωρίδες στη μέση των λάμψεων, μακριά από γωνίες, και ξαναμέτρησε.',retakes:'ξαναμετρήθηκαν',unstable:'ακόμα ασταθή'}};
 const $=id=>document.getElementById(id);
 const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 let L=store.get('ab_lang')||((navigator.language||'').toLowerCase().startsWith('el')?'el':'en');
@@ -226,13 +226,60 @@ async function doLock(){
     if(c.focusMode&&c.focusMode.includes('manual'))adv.focusMode='manual';
     if(!adv.exposureMode&&!adv.whiteBalanceMode){mm('',t('noLock'));setGo('lock');return;}
     await track.applyConstraints({advanced:[adv]});await wait(800);
+    const pl=await autoPlace();  // v0.9: the bands find their place by themselves
     for(let i=0;i<8;i++){const cl=Math.max(live.S?live.S.clip:0,live.B?live.B.clip:0);if(cl<=0.005)break;
       mm('',t('mDark'));const cc=track.getCapabilities(),ss=track.getSettings(),et=cc.exposureTime||{};let v=ss.exposureTime*0.7;if(et.min!==undefined)v=Math.max(et.min,v);
       if(ss.exposureTime&&v>=ss.exposureTime)break;await track.applyConstraints({advanced:[{exposureMode:'manual',exposureTime:v}]});await wait(700);}
     locked=true;const a=track.getSettings();data.camera={label:track.label,exposureTime:a.exposureTime,iso:a.iso,colorTemperature:a.colorTemperature,exposureMode:a.exposureMode,whiteBalanceMode:a.whiteBalanceMode};
     const cl=Math.max(live.S?live.S.clip:0,live.B?live.B.clip:0);
-    mm('',(cl>0.005?t('mClip')+' ':'')+t('mReady'));setGo('start');
+    mm('',(pl?pl+' ':'')+(cl>0.005?t('mClip')+' ':'')+t('mReady'));setGo('start');
   }catch(e){mm('','✗ '+e);setGo('lock');}}
+// v0.9 (user's v0.8 run: both wide bands were ON the TV screen, only the thin lines behind them on the glows): after
+// the lock the page finds the bands itself from four pictures (strip held by test_colour, so the TV stream cannot
+// change it meanwhile): base = TV black + strip dark; strip = TV black + strip white 64; screen = TV «white centre,
+// black frame» (the Ambilight goes dark: only the screen lights up); glow = TV «white frame» + strip dark.
+// Screen = the bright centre's box, widened by its 20 % frames. Top band: above the screen, where the TV glow has
+// fallen to half its peak (going away from the screen); bottom band: below the screen, where the strip's glow has
+// fallen to half. Both span the middle half of the screen's width. Check: top lit by the TV not the strip, bottom
+// by the strip not the TV, neither on the screen.
+async function grabLum(n){const v=$('vid'),W=160,H=Math.max(1,Math.round(160*v.videoHeight/Math.max(1,v.videoWidth))),cv=$('cv');
+  cv.width=W;cv.height=H;const x=cv.getContext('2d',{willReadFrequently:true}),acc=new Float32Array(W*H);
+  for(let k=0;k<n;k++){x.drawImage(v,0,0,W,H);const d=x.getImageData(0,0,W,H).data;
+    for(let i=0,j=0;j<acc.length;i+=4,j++)acc[j]+=0.2126*lin(d[i])+0.7152*lin(d[i+1])+0.0722*lin(d[i+2]);await wait(150);}
+  for(let j=0;j<acc.length;j++)acc[j]/=n;return {W,H,a:acc};}
+async function autoPlace(){
+  const tc=o=>ambiPost('/test_colour',{...o,ms:20000});
+  try{await unlock();await tc({r:0,g:0,b:0});}catch(e){data.place={ok:false,why:'no test_colour'};return t('plManual');}
+  const res={ok:false};
+  try{
+    mm(undefined,t('plRun')+' 1/4');await castImage('black.png');await wait(3500);const F0=await grabLum(5);
+    mm(undefined,t('plRun')+' 2/4');await tc({r:64,g:64,b:64});await wait(1500);const FS=await grabLum(5);
+    mm(undefined,t('plRun')+' 3/4');await tc({r:0,g:0,b:0});await castImage('centre_white.png');await wait(4000);const FC=await grabLum(5);
+    mm(undefined,t('plRun')+' 4/4');await castImage('frame_white.png');await wait(4000);const FA=await grabLum(5);
+    const {W,H}=F0,dif=(F)=>F.a.map((v,i)=>Math.max(0,v-F0.a[i]));const dS=dif(FS),dC=dif(FC),dA=dif(FA);
+    // the screen: the bright centre (> 30 % of its 99th percentile), widened by the 20 % frames (centre = 60 %)
+    const sorted=Float32Array.from(dC).sort(),p99=sorted[Math.floor(sorted.length*0.99)];
+    let x0=W,y0=H,x1=-1,y1=-1;
+    if(p99>0.01)for(let y=0;y<H;y++)for(let x=0;x<W;x++)if(dC[y*W+x]>0.3*p99){if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}
+    if(x1<0){res.why='screen not found';data.place=res;return t('plNoScreen');}
+    const mx=(x1-x0+1)/3,my=(y1-y0+1)/3;const sx0=Math.max(0,x0-mx),sx1=Math.min(W-1,x1+mx),sy0=Math.max(0,y0-my),sy1=Math.min(H-1,y1+my);
+    res.screen={x0:+(sx0/W).toFixed(3),y0:+(sy0/H).toFixed(3),x1:+(sx1/W).toFixed(3),y1:+(sy1/H).toFixed(3)};
+    const cx0=Math.round(sx0+(sx1-sx0)*0.25),cx1=Math.round(sx0+(sx1-sx0)*0.75);
+    const row=(D,y)=>{let s=0;for(let x=cx0;x<=cx1;x++)s+=D[y*W+x];return s/(cx1-cx0+1);};
+    // walk away from the screen: find the glow's peak, then the first row where it has fallen to half
+    const half=(D,from,step,stop)=>{let pk=0,py=-1;for(let y=from;y!==stop;y+=step){const v=row(D,y);if(v>pk){pk=v;py=y;}}
+      if(py<0||pk<0.002)return null;for(let y=py;y!==stop;y+=step)if(row(D,y)<=0.5*pk)return {y,peak:pk};return {y:stop-step,peak:pk};};
+    const top=half(dA,Math.floor(sy0)-1,-1,-1),bot=half(dS,Math.ceil(sy1)+1,1,H);
+    const bw=Math.max(0.15,(cx1-cx0+1)/W),bh=0.05,bx=Math.max(0,Math.min(1-bw,cx0/W));
+    const msgs=[];
+    if(top){box.S={x:bx,y:Math.max(0,Math.min(1-bh,top.y/H-bh/2)),w:bw,h:bh};const tv=row(dA,top.y),st=row(dS,top.y);res.top={y:+(top.y/H).toFixed(3),tv:+tv.toFixed(4),strip:+st.toFixed(4)};
+      if(st>0.3*tv)msgs.push(t('plTopStrip'));}else msgs.push(t('plNoTop'));
+    if(bot){box.B={x:bx,y:Math.max(0,Math.min(1-bh,bot.y/H-bh/2)),w:bw,h:bh};const st=row(dS,bot.y),tv=row(dA,bot.y);res.bottom={y:+(bot.y/H).toFixed(3),strip:+st.toFixed(4),tv:+tv.toFixed(4)};
+      if(tv>0.3*st)msgs.push(t('plBotTv'));}else msgs.push(t('plNoBot'));
+    res.ok=!msgs.length;data.place=res;
+    return res.ok?t('plOk'):'✗ '+msgs.join(' ');
+  }catch(e){res.why=String(e);data.place=res;return '✗ '+e;}
+  finally{try{await unlock();await ambiPost('/test_colour',{off:true});}catch(e){}try{await castImage('frame_white.png');}catch(e){}}}
 // dragging: the nearest box follows the finger (not while measuring)
 const ov=$('ov');let drag=null;
 function rel(e){const r=ov.getBoundingClientRect();return [(e.clientX-r.left)/r.width,(e.clientY-r.top)/r.height];}
