@@ -100,6 +100,17 @@ them into the same card instead (or take them from Home Assistant): see
 [docs/JOINTSPACE.md](docs/JOINTSPACE.md). Without JointSpace the strip works; only the corner
 blending is simpler.
 
+### Colour calibration with your phone (experimental)
+
+**[Open the companion page](https://thothothodoras.github.io/AmbiBottom/companion/measure.html)**
+(also linked from the ESP page: *Bridge & settings → Camera calibration*). It casts test colours to the TV,
+watches the TV's own glow and the strip's glow with the phone's camera, and computes a
+colour correction so the bottom matches the factory sides; you preview it, fine-tune the
+white by eye and keep it in one of the 3 memory slots. Use Chrome on Android, on the same
+Wi-Fi as the TV and the ESP. Nothing leaves the browser except the requests to your own
+ESP and TV. The correction and the slots need firmware newer than v0.50 (next release);
+with v0.50 the page only measures.
+
 ## How it works
 
 ```

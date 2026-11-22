@@ -121,7 +121,7 @@ ol{margin:6px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
 </div>
 <canvas id="cv" style="display:none"></canvas>
 <script>
-const PAGE_VERSION='0.14';
+const PAGE_VERSION='0.15';
 const T={
  en:{title:'colour measurement',intro:'Measurement only: it finds out how your strip and your TV really look on your wall, so the colour correction can be computed. Nothing is changed for good; at the end everything is as before. About 3 minutes.',
   i1:'Colours on the TV, the strip as it is now.',i2:'The same colours, the strip dark for a while (a preview, not saved).',i3:'The TV turns BLACK on purpose for about 50 s and the strip shows its own red, green, blue at 4 levels (this also teaches the page how your camera sees light).',mQuick:'Quick: 5 colours (about 2 min)',mFull:'Full: 11 colours (about 3.5 min)',
@@ -180,6 +180,9 @@ const data={page:'measure',page_version:PAGE_VERSION,reference:'top (box TV)',ua
 // ---------------- 1. ESP
 let ESP=null,saved=null,savedFull=null,pinMem='';
 $('addr').value=store.get('ab_addr')||'';
+// v0.15: the ESP page's link brings its own address after the # (stays in the browser, never sent to GitHub)
+{const m=/(?:^#|&)esp=([A-Za-z0-9.\-]+(?::\d{1,5})?)(?:&|$)/.exec(location.hash||'');
+ if(m){$('addr').value=m[1];store.set('ab_addr',m[1]);try{history.replaceState(null,'',location.pathname+location.search);}catch(e){}setTimeout(()=>$('pin').focus(),0);}}
 $('addr').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('pin').focus();}});
 $('pin').addEventListener('keydown',e=>{if(e.key==='Enter'){e.preventDefault();$('conGo').click();}});
 const espGet=p=>fetch(ESP+p,{cache:'no-store',targetAddressSpace:'local'}).then(r=>{if(!r.ok)throw new Error('http '+r.status);return r.json();});
