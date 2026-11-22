@@ -25,6 +25,10 @@ main{max-width:640px;margin:0 auto;padding:16px}
 .btn.pri{background:var(--acc);border-color:var(--acc);color:#06221d}.btn.bad{border-color:var(--bad);color:var(--bad)}
 .btn:disabled{opacity:.45;cursor:default}
 .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+#tryBox .row{gap:12px}#tryBox .row+.row{margin-top:12px}
+#tryState{margin:12px 0 4px;padding:10px 12px;border-radius:10px;font-weight:600;font-size:14px;border:1px solid var(--line)}
+#tryState.on{background:rgba(224,176,64,.14);border-color:var(--warn);color:var(--warn)}#tryState.off{background:var(--panel2);color:var(--muted)}
+.btn.cur{outline:2px solid var(--acc2);outline-offset:2px}
 input[type=text],input[type=password]{flex:1;min-width:0;background:var(--panel2);border:1px solid var(--line);color:var(--text);border-radius:10px;padding:10px 12px;font:inherit}
 .res{margin-top:10px;font-size:14px;white-space:pre-wrap;word-break:break-word}
 .ok{color:var(--ok)}.bad{color:var(--bad)}.warn{color:var(--warn)}.mut{color:var(--muted)}
@@ -101,8 +105,9 @@ ol{margin:6px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
     <div id="tryBox" style="display:none;margin-top:12px;border-top:1px solid var(--line);padding-top:12px">
       <p class="mut" id="tryPtxt"></p>
       <div class="row"><button class="btn pri" id="tryOn"></button><button class="btn" id="tryOff" data-t="tryOff" disabled></button></div>
-      <div class="row" style="margin-top:8px" id="tryPats"></div>
-      <div class="row" style="margin-top:6px"><button class="btn" id="tryFade" data-t="tryFade"></button></div>
+      <div id="tryState" class="off" role="status"></div>
+      <div class="row" style="margin-top:12px" id="tryPats"></div>
+      <div class="row" style="margin-top:12px"><button class="btn" id="tryFade" data-t="tryFade"></button></div>
       <p class="mut" style="margin:10px 0 4px" id="trimPtxt"></p>
       <div class="trow"><span data-t="trWarm"></span><button class="nb" data-nudge="trX,-5">−</button><input type="range" id="trX" min="-200" max="200" step="1" value="0"><button class="nb" data-nudge="trX,5">+</button><span data-t="trCool"></span></div>
       <div class="trow"><span data-t="trGreen"></span><button class="nb" data-nudge="trY,-5">−</button><input type="range" id="trY" min="-200" max="200" step="1" value="0"><button class="nb" data-nudge="trY,5">+</button><span data-t="trMag"></span></div>
@@ -126,7 +131,7 @@ ol{margin:6px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
 </div>
 <canvas id="cv" style="display:none"></canvas>
 <script>
-const PAGE_VERSION='0.16';
+const PAGE_VERSION='0.17';
 const T={
  en:{title:'colour measurement',intro:'Measurement only: it finds out how your strip and your TV really look on your wall, so the colour correction can be computed. Nothing is changed for good; at the end everything is as before. About 3 minutes.',
   i1:'Colours on the TV, the strip as it is now.',i2:'The same colours, the strip dark for a while (a preview, not saved).',i3:'The TV turns BLACK on purpose for about 50 s and the strip shows its own red, green, blue at 4 levels (this also teaches the page how your camera sees light).',mQuick:'Quick: 5 colours (about 2 min)',mFull:'Full: 11 colours (about 3.5 min)',
@@ -143,7 +148,7 @@ const T={
   phC:'1 / 3 · The TV plays colours, the strip as it is now',phB:'2 / 3 · The same colours, the strip dark for a while',phA:'3 / 3 · The TV is BLACK on purpose (about 50 s): the strip shows red, green, blue',
   cd:'Starts in %s s – set the phone down and let go',again:'measuring again: ',moved:'Moved – hold still',restore:'Putting everything back…',done:'Done. Press «See the results».',stopped:'Stopped, everything put back.',
   noLock:'This camera cannot lock exposure / white balance.',copied:'Copied.',
-  sumT:'Before (C): TV glow vs bottom, colour difference (smaller = better), at the band and behind it',col:'Colour',diff:'Δ',diff2:'Δ behind',bri:'bottom / TV',okRep:'Repeatable: the band and the line behind it agree.',plRun:'Finding the bands',tryP:'Try the correction from this run on the strip: a PREVIEW, nothing is saved. «Back» returns to your settings (a restart does too).',tryOn:'Try the correction',eyeT:'Fine-tune by eye (no measurement)',tryP0:'Fine-tune what plays on the strip now, without the measurement: a PREVIEW, nothing is saved until you keep it in a slot. Cast (2) first to send colours to the TV. «Back to now» returns to your settings (a restart does too).',tryOn0:'Start the preview',trZero0:'As now',trimP0:'Cast white first: the strip follows at once; − / + are small steps. All at 0 and 100 % = exactly what plays now.',tryBase:'Starting point: ',tryBaseCm:'the colour correction in force ✦',tryBaseWb:'the white balance in force ',mmBot:'bottom',tryOff:'Back to now',tryIsOn:'The correction is ON (preview, NOT saved). Cast a colour below and compare; then «Back to now».',tryIsOff:'Back to your settings.',tryPred:'Expected Δ now → with it:',trimP:'White by eye (cast white first): the strip follows at once (the sliders switch the correction on); − / + are small steps. 100 % brightness = the white as bright as now. Remembered on this phone.',slotP:'Keep this correction (as on the strip now, with the sliders) in a memory slot of the ESP; you switch slots on the ESP page (Bridge & settings → Camera calibration). ✦ = a slot with a colour correction.',slotEmpty:'empty',slotOld:'The ESP firmware is older than v0.53: its slots cannot keep a colour correction.',slotAsk:'Replace slot %n («%s») with this correction?',slotName:'Name of the slot:',slotDef:'Calibration',slotOk:'✓ Kept in slot %n. Nothing changed on the strip: load it on the ESP page when you want it.',trDim:'Dimmer',trBright:'Brighter',tryFade:'Smooth fades (19 s video)',trWarm:'Warmer',trCool:'Cooler',trGreen:'Greener',trMag:'More magenta',trZero:'As measured',trimNow:'White: warm/cool %x · green/magenta %y · brightness %b %',plWallTop:'Too little wall ABOVE the TV in the picture: move the phone back or lower.',plWallBot:'Too little wall BELOW the TV in the picture: move the phone back or higher.',plTopEdge:'The TV glow reaches past the top of the picture.',plBotEdge:'The strip glow reaches past the bottom of the picture.',plOk:'✓ The bands found their place (on the glows, not on the screen); move them if you want.',plManual:'Old firmware: place the bands by hand.',plNoScreen:'✗ The screen was not found: the whole TV must be in the picture.',plNoTop:'No TV glow found above the screen.',plNoBot:'No strip glow found below the screen.',plTopStrip:'The top band also gets strip light.',plBotTv:'The bottom band also gets TV light.',camLine:'Camera response (from the strip): gamma R / G / B %g · white = %a × (red + green + blue) (1 = additive).',noCurve:'No camera curve (the strip part did not run, or old firmware): raw camera values.',badRep:'NOT repeatable: the band and the line behind it disagree (median %s). Move the bands to the middle of the glows, away from corners, and measure again.',retakes:'measured again',unstable:'still unsteady'},
+  sumT:'Before (C): TV glow vs bottom, colour difference (smaller = better), at the band and behind it',col:'Colour',diff:'Δ',diff2:'Δ behind',bri:'bottom / TV',okRep:'Repeatable: the band and the line behind it agree.',plRun:'Finding the bands',tryP:'Try the correction from this run on the strip: a PREVIEW, nothing is saved. «Back» returns to your settings (a restart does too).',tryOn:'Try the correction',eyeT:'Fine-tune by eye (no measurement)',tryP0:'Fine-tune what plays on the strip now, without the measurement: a PREVIEW, nothing is saved until you keep it in a slot. Cast (2) first to send colours to the TV. «Back to now» returns to your settings (a restart does too).',tryOn0:'Start the preview',stOn:'● PREVIEW ON: the strip shows the sliders (not saved).',stOff:'○ Preview off: the strip plays your saved settings.',stTv:'On the TV: ',stNoCast:'Cast (2) first, then the colour goes to the TV.',stSent:' · sent ✓',tryOnIs:'✓ Preview on',cn:{white:'white',red:'red',yellow:'yellow',green:'green',blue:'blue',grey50:'grey',cyan:'cyan',magenta:'magenta',orange:'orange',skin:'skin',purple:'purple'},fadesName:'smooth fades',trZero0:'As now',trimP0:'Cast white first: the strip follows at once; − / + are small steps. All at 0 and 100 % = exactly what plays now.',tryBase:'Starting point: ',tryBaseCm:'the colour correction in force ✦',tryBaseWb:'the white balance in force ',mmBot:'bottom',tryOff:'Back to now',tryIsOn:'The correction is ON (preview, NOT saved). Cast a colour below and compare; then «Back to now».',tryIsOff:'Back to your settings.',tryPred:'Expected Δ now → with it:',trimP:'White by eye (cast white first): the strip follows at once (the sliders switch the correction on); − / + are small steps. 100 % brightness = the white as bright as now. Remembered on this phone.',slotP:'Keep this correction (as on the strip now, with the sliders) in a memory slot of the ESP; you switch slots on the ESP page (Bridge & settings → Camera calibration). ✦ = a slot with a colour correction.',slotEmpty:'empty',slotOld:'The ESP firmware is older than v0.53: its slots cannot keep a colour correction.',slotAsk:'Replace slot %n («%s») with this correction?',slotName:'Name of the slot:',slotDef:'Calibration',slotOk:'✓ Kept in slot %n. Nothing changed on the strip: load it on the ESP page when you want it.',trDim:'Dimmer',trBright:'Brighter',tryFade:'Smooth fades (19 s video)',trWarm:'Warmer',trCool:'Cooler',trGreen:'Greener',trMag:'More magenta',trZero:'As measured',trimNow:'White: warm/cool %x · green/magenta %y · brightness %b %',plWallTop:'Too little wall ABOVE the TV in the picture: move the phone back or lower.',plWallBot:'Too little wall BELOW the TV in the picture: move the phone back or higher.',plTopEdge:'The TV glow reaches past the top of the picture.',plBotEdge:'The strip glow reaches past the bottom of the picture.',plOk:'✓ The bands found their place (on the glows, not on the screen); move them if you want.',plManual:'Old firmware: place the bands by hand.',plNoScreen:'✗ The screen was not found: the whole TV must be in the picture.',plNoTop:'No TV glow found above the screen.',plNoBot:'No strip glow found below the screen.',plTopStrip:'The top band also gets strip light.',plBotTv:'The bottom band also gets TV light.',camLine:'Camera response (from the strip): gamma R / G / B %g · white = %a × (red + green + blue) (1 = additive).',noCurve:'No camera curve (the strip part did not run, or old firmware): raw camera values.',badRep:'NOT repeatable: the band and the line behind it disagree (median %s). Move the bands to the middle of the glows, away from corners, and measure again.',retakes:'measured again',unstable:'still unsteady'},
  el:{title:'μέτρηση χρώματος',intro:'Μόνο μέτρηση: βρίσκει πώς φαίνονται πραγματικά η ταινία σου και η TV σου στον τοίχο, για να υπολογιστεί η διόρθωση χρώματος. Δεν αλλάζει τίποτα μόνιμα· στο τέλος όλα είναι όπως πριν. Περίπου 3 λεπτά.',
   i1:'Χρώματα στην TV, η ταινία όπως είναι τώρα.',i2:'Τα ίδια χρώματα, η ταινία σβηστή για λίγο (προεπισκόπηση, δεν αποθηκεύεται).',i3:'Η TV γίνεται ΕΠΙΤΗΔΕΣ μαύρη για περίπου 50 s και η ταινία δείχνει το δικό της κόκκινο, πράσινο, μπλε σε 4 εντάσεις (έτσι η σελίδα μαθαίνει και πώς βλέπει το φως η κάμερά σου).',mQuick:'Γρήγορη: 5 χρώματα (περίπου 2 λεπτά)',mFull:'Πλήρης: 11 χρώματα (περίπου 3,5 λεπτά)',
   conT:'Σύνδεση',conP:'Διεύθυνση του ESP και PIN ρυθμίσεων (το PIN μένει μόνο στη μνήμη της σελίδας, δεν αποθηκεύεται πουθενά).',conGo:'Σύνδεση',
@@ -159,7 +164,7 @@ const T={
   phC:'1 / 3 · Η TV παίζει χρώματα, η ταινία όπως είναι τώρα',phB:'2 / 3 · Τα ίδια χρώματα, η ταινία σβηστή για λίγο',phA:'3 / 3 · Η TV είναι ΕΠΙΤΗΔΕΣ μαύρη (περίπου 50 s): η ταινία δείχνει κόκκινο, πράσινο, μπλε',
   cd:'Ξεκινάει σε %s s – στήσε το κινητό και άφησέ το',again:'ξαναμετράω: ',moved:'Κουνήθηκε – κράτα σταθερά',restore:'Επαναφορά όλων…',done:'Τέλος. Πάτα «Δες τα αποτελέσματα».',stopped:'Διακόπηκε, όλα επανήλθαν.',
   noLock:'Η κάμερα δεν μπορεί να κλειδώσει έκθεση / white balance.',copied:'Αντιγράφηκε.',
-  sumT:'Πριν (C): λάμψη TV vs κάτω, διαφορά χρώματος (μικρότερο = καλύτερα), στη λωρίδα και πίσω της',col:'Χρώμα',diff:'Δ',diff2:'Δ πίσω',bri:'κάτω / TV',okRep:'Επαναλήψιμη: η λωρίδα και η γραμμή πίσω της συμφωνούν.',plRun:'Βρίσκω τις λωρίδες',tryP:'Δοκίμασε τη διόρθωση αυτής της μέτρησης στην ταινία: ΠΡΟΕΠΙΣΚΟΠΗΣΗ, δεν αποθηκεύεται τίποτα. Το «Πίσω» γυρίζει στις ρυθμίσεις σου (το ίδιο και ένα restart).',tryOn:'Δοκίμασε τη διόρθωση',eyeT:'Ρύθμιση με το μάτι (χωρίς μέτρηση)',tryP0:'Ρύθμισε ό,τι παίζει τώρα στην ταινία, χωρίς μέτρηση: ΠΡΟΕΠΙΣΚΟΠΗΣΗ, δεν αποθηκεύεται τίποτα μέχρι να το κρατήσεις σε θέση. Κάνε πρώτα Cast (2) για να στέλνεις χρώματα στην TV. Το «Πίσω στο τωρινό» γυρίζει στις ρυθμίσεις σου (το ίδιο και ένα restart).',tryOn0:'Ξεκίνα την προεπισκόπηση',trZero0:'Όπως τώρα',trimP0:'Ρίξε πρώτα λευκό: η ταινία ακολουθεί αμέσως· τα − / + είναι μικρά βήματα. Όλα στο 0 και 100 % = ακριβώς ό,τι παίζει τώρα.',tryBase:'Αφετηρία: ',tryBaseCm:'η διόρθωση χρώματος που ισχύει ✦',tryBaseWb:'η ισορροπία λευκού που ισχύει ',mmBot:'κάτω',tryOff:'Πίσω στο τωρινό',tryIsOn:'Η διόρθωση ΠΑΙΖΕΙ (προεπισκόπηση, ΔΕΝ αποθηκεύτηκε). Ρίξε ένα χρώμα από κάτω και σύγκρινε· μετά «Πίσω στο τωρινό».',tryIsOff:'Πίσω στις ρυθμίσεις σου.',tryPred:'Αναμενόμενο Δ τώρα → με τη διόρθωση:',trimP:'Το λευκό με το μάτι (ρίξε πρώτα λευκό): η ταινία ακολουθεί αμέσως (τα ρυθμιστικά ανάβουν και τη διόρθωση)· τα − / + είναι μικρά βήματα. Φωτεινότητα 100 % = το λευκό όσο φωτεινό είναι τώρα. Το κινητό τα θυμάται.',slotP:'Κράτα αυτή τη διόρθωση (όπως παίζει τώρα στην ταινία, με τα ρυθμιστικά) σε θέση μνήμης του ESP· τις θέσεις τις αλλάζεις στη σελίδα του ESP (Bridge & ρυθμίσεις → Βαθμονόμηση με κάμερα). ✦ = θέση με διόρθωση χρώματος.',slotEmpty:'κενή',slotOld:'Το firmware του ESP είναι παλαιότερο από v0.53: οι θέσεις του δεν κρατούν διόρθωση χρώματος.',slotAsk:'Να αντικατασταθεί η θέση %n («%s») με αυτή τη διόρθωση;',slotName:'Όνομα θέσης:',slotDef:'Βαθμονόμηση',slotOk:'✓ Κρατήθηκε στη θέση %n. Η ταινία δεν άλλαξε: φόρτωσέ τη από τη σελίδα του ESP όταν θέλεις.',trDim:'Πιο σκοτεινό',trBright:'Πιο φωτεινό',tryFade:'Ομαλές μεταβάσεις (βίντεο 19 s)',trWarm:'Πιο ζεστό',trCool:'Πιο ψυχρό',trGreen:'Πιο πράσινο',trMag:'Πιο ματζέντα',trZero:'Όπως μετρήθηκε',trimNow:'Λευκό: ζεστό/ψυχρό %x · πράσινο/ματζέντα %y · φωτεινότητα %b %',plWallTop:'Λίγος τοίχος ΠΑΝΩ από την TV στο κάδρο: πήγαινε πιο πίσω ή πιο χαμηλά με το κινητό.',plWallBot:'Λίγος τοίχος ΚΑΤΩ από την TV στο κάδρο: πήγαινε πιο πίσω ή πιο ψηλά με το κινητό.',plTopEdge:'Η λάμψη της TV βγαίνει έξω από την εικόνα, πάνω.',plBotEdge:'Η λάμψη της ταινίας βγαίνει έξω από την εικόνα, κάτω.',plOk:'✓ Οι λωρίδες βρήκαν θέση μόνες τους (στις λάμψεις, όχι στην οθόνη)· μετακίνησέ τες αν θέλεις.',plManual:'Παλιό firmware: βάλε τις λωρίδες με το χέρι.',plNoScreen:'✗ Δεν βρέθηκε η οθόνη: να φαίνεται όλη η TV στο κάδρο.',plNoTop:'Δεν βρέθηκε λάμψη TV πάνω από την οθόνη.',plNoBot:'Δεν βρέθηκε λάμψη ταινίας κάτω από την οθόνη.',plTopStrip:'Η πάνω λωρίδα παίρνει και φως από την ταινία.',plBotTv:'Η κάτω λωρίδα παίρνει και φως από την TV.',camLine:'Απόκριση κάμερας (από την ταινία): γάμμα R / G / B %g · λευκό = %a × (κόκκινο + πράσινο + μπλε) (1 = αθροίζονται).',noCurve:'Χωρίς καμπύλη κάμερας (δεν έτρεξε το κομμάτι της ταινίας ή παλιό firmware): ωμές τιμές κάμερας.',badRep:'ΟΧΙ επαναλήψιμη: η λωρίδα και η γραμμή πίσω της διαφωνούν (διάμεσος %s). Βάλε τις λωρίδες στη μέση των λάμψεων, μακριά από γωνίες, και ξαναμέτρησε.',retakes:'ξαναμετρήθηκαν',unstable:'ακόμα ασταθή'}};
+  sumT:'Πριν (C): λάμψη TV vs κάτω, διαφορά χρώματος (μικρότερο = καλύτερα), στη λωρίδα και πίσω της',col:'Χρώμα',diff:'Δ',diff2:'Δ πίσω',bri:'κάτω / TV',okRep:'Επαναλήψιμη: η λωρίδα και η γραμμή πίσω της συμφωνούν.',plRun:'Βρίσκω τις λωρίδες',tryP:'Δοκίμασε τη διόρθωση αυτής της μέτρησης στην ταινία: ΠΡΟΕΠΙΣΚΟΠΗΣΗ, δεν αποθηκεύεται τίποτα. Το «Πίσω» γυρίζει στις ρυθμίσεις σου (το ίδιο και ένα restart).',tryOn:'Δοκίμασε τη διόρθωση',eyeT:'Ρύθμιση με το μάτι (χωρίς μέτρηση)',tryP0:'Ρύθμισε ό,τι παίζει τώρα στην ταινία, χωρίς μέτρηση: ΠΡΟΕΠΙΣΚΟΠΗΣΗ, δεν αποθηκεύεται τίποτα μέχρι να το κρατήσεις σε θέση. Κάνε πρώτα Cast (2) για να στέλνεις χρώματα στην TV. Το «Πίσω στο τωρινό» γυρίζει στις ρυθμίσεις σου (το ίδιο και ένα restart).',tryOn0:'Ξεκίνα την προεπισκόπηση',stOn:'● ΠΡΟΕΠΙΣΚΟΠΗΣΗ ΑΝΟΙΧΤΗ: η ταινία δείχνει τα ρυθμιστικά (δεν αποθηκεύτηκε).',stOff:'○ Προεπισκόπηση κλειστή: η ταινία παίζει τις αποθηκευμένες ρυθμίσεις σου.',stTv:'Στην TV: ',stNoCast:'Κάνε πρώτα Cast (2) και μετά πάει το χρώμα στην TV.',stSent:' · στάλθηκε ✓',tryOnIs:'✓ Προεπισκόπηση ανοιχτή',cn:{white:'λευκό',red:'κόκκινο',yellow:'κίτρινο',green:'πράσινο',blue:'μπλε',grey50:'γκρι',cyan:'κυανό',magenta:'ματζέντα',orange:'πορτοκαλί',skin:'δέρμα',purple:'μωβ'},fadesName:'ομαλές μεταβάσεις',trZero0:'Όπως τώρα',trimP0:'Ρίξε πρώτα λευκό: η ταινία ακολουθεί αμέσως· τα − / + είναι μικρά βήματα. Όλα στο 0 και 100 % = ακριβώς ό,τι παίζει τώρα.',tryBase:'Αφετηρία: ',tryBaseCm:'η διόρθωση χρώματος που ισχύει ✦',tryBaseWb:'η ισορροπία λευκού που ισχύει ',mmBot:'κάτω',tryOff:'Πίσω στο τωρινό',tryIsOn:'Η διόρθωση ΠΑΙΖΕΙ (προεπισκόπηση, ΔΕΝ αποθηκεύτηκε). Ρίξε ένα χρώμα από κάτω και σύγκρινε· μετά «Πίσω στο τωρινό».',tryIsOff:'Πίσω στις ρυθμίσεις σου.',tryPred:'Αναμενόμενο Δ τώρα → με τη διόρθωση:',trimP:'Το λευκό με το μάτι (ρίξε πρώτα λευκό): η ταινία ακολουθεί αμέσως (τα ρυθμιστικά ανάβουν και τη διόρθωση)· τα − / + είναι μικρά βήματα. Φωτεινότητα 100 % = το λευκό όσο φωτεινό είναι τώρα. Το κινητό τα θυμάται.',slotP:'Κράτα αυτή τη διόρθωση (όπως παίζει τώρα στην ταινία, με τα ρυθμιστικά) σε θέση μνήμης του ESP· τις θέσεις τις αλλάζεις στη σελίδα του ESP (Bridge & ρυθμίσεις → Βαθμονόμηση με κάμερα). ✦ = θέση με διόρθωση χρώματος.',slotEmpty:'κενή',slotOld:'Το firmware του ESP είναι παλαιότερο από v0.53: οι θέσεις του δεν κρατούν διόρθωση χρώματος.',slotAsk:'Να αντικατασταθεί η θέση %n («%s») με αυτή τη διόρθωση;',slotName:'Όνομα θέσης:',slotDef:'Βαθμονόμηση',slotOk:'✓ Κρατήθηκε στη θέση %n. Η ταινία δεν άλλαξε: φόρτωσέ τη από τη σελίδα του ESP όταν θέλεις.',trDim:'Πιο σκοτεινό',trBright:'Πιο φωτεινό',tryFade:'Ομαλές μεταβάσεις (βίντεο 19 s)',trWarm:'Πιο ζεστό',trCool:'Πιο ψυχρό',trGreen:'Πιο πράσινο',trMag:'Πιο ματζέντα',trZero:'Όπως μετρήθηκε',trimNow:'Λευκό: ζεστό/ψυχρό %x · πράσινο/ματζέντα %y · φωτεινότητα %b %',plWallTop:'Λίγος τοίχος ΠΑΝΩ από την TV στο κάδρο: πήγαινε πιο πίσω ή πιο χαμηλά με το κινητό.',plWallBot:'Λίγος τοίχος ΚΑΤΩ από την TV στο κάδρο: πήγαινε πιο πίσω ή πιο ψηλά με το κινητό.',plTopEdge:'Η λάμψη της TV βγαίνει έξω από την εικόνα, πάνω.',plBotEdge:'Η λάμψη της ταινίας βγαίνει έξω από την εικόνα, κάτω.',plOk:'✓ Οι λωρίδες βρήκαν θέση μόνες τους (στις λάμψεις, όχι στην οθόνη)· μετακίνησέ τες αν θέλεις.',plManual:'Παλιό firmware: βάλε τις λωρίδες με το χέρι.',plNoScreen:'✗ Δεν βρέθηκε η οθόνη: να φαίνεται όλη η TV στο κάδρο.',plNoTop:'Δεν βρέθηκε λάμψη TV πάνω από την οθόνη.',plNoBot:'Δεν βρέθηκε λάμψη ταινίας κάτω από την οθόνη.',plTopStrip:'Η πάνω λωρίδα παίρνει και φως από την ταινία.',plBotTv:'Η κάτω λωρίδα παίρνει και φως από την TV.',camLine:'Απόκριση κάμερας (από την ταινία): γάμμα R / G / B %g · λευκό = %a × (κόκκινο + πράσινο + μπλε) (1 = αθροίζονται).',noCurve:'Χωρίς καμπύλη κάμερας (δεν έτρεξε το κομμάτι της ταινίας ή παλιό firmware): ωμές τιμές κάμερας.',badRep:'ΟΧΙ επαναλήψιμη: η λωρίδα και η γραμμή πίσω της διαφωνούν (διάμεσος %s). Βάλε τις λωρίδες στη μέση των λάμψεων, μακριά από γωνίες, και ξαναμέτρησε.',retakes:'ξαναμετρήθηκαν',unstable:'ακόμα ασταθή'}};
 const $=id=>document.getElementById(id);
 const store={get(k){try{return localStorage.getItem(k)}catch(e){return null}},set(k,v){try{localStorage.setItem(k,v)}catch(e){}}};
 let L=store.get('ab_lang')||((navigator.language||'').toLowerCase().startsWith('el')?'el':'en');
@@ -328,6 +333,23 @@ async function autoPlace(){
       if(st>0.3*tv)msgs.push(t('plTopStrip'));}else msgs.push(t('plNoTop'));
     if(bot){box.B={x:bx,y:Math.max(0,Math.min(1-bh,bot.y/H-bh/2)),w:bw,h:bh};const st=row(dS,bot.y),tv=row(dA,bot.y);res.bottom={y:+(bot.y/H).toFixed(3),strip:+st.toFixed(4),tv:+tv.toFixed(4)};
       if(tv>0.3*st)msgs.push(t('plBotTv'));}else msgs.push(t('plNoBot'));
+    // v0.17 (user: «να έχει ψιλο custom σχήμα… να το βρίσκει μόνο του»; the band felt too big): each band takes the
+    // glow's own shape - per column (3-column average), walking away from the screen past the glow's peak, the pixels
+    // where it has fallen to 62-88 % of that column's peak (near) and to 40-56 % (far); pixels lit more by the other
+    // source are left out. Too few pixels -> the rectangle stays.
+    const shape=(D,O,from,step,stop)=>{const near=new Uint8Array(W*H),far=new Uint8Array(W*H);let nn=0,nf=0;
+      const cv=(x,y)=>{let a=0,c=0;for(let k=-1;k<=1;k++){const xx=x+k;if(xx>=0&&xx<W){a+=D[y*W+xx];c++;}}return a/c;};
+      for(let x=cx0;x<=cx1;x++){let pk=0,py=-1;for(let y=from;y!==stop;y+=step){const v=cv(x,y);if(v>pk){pk=v;py=y;}}
+        if(py<0||pk<0.002)continue;
+        for(let y=py;y!==stop;y+=step){const v=cv(x,y),i=y*W+x;if(v<0.38*pk)break;if(O[i]>0.3*D[i])continue;
+          if(v<=0.88*pk&&v>=0.62*pk){near[i]=1;nn++;}else if(v<=0.56*pk&&v>=0.40*pk){far[i]=1;nf++;}}}
+      const minPx=Math.max(20,0.08*(cx1-cx0+1)*3);if(nn<minPx||nf<minPx)return null;
+      let x0=W,y0=H,x1=-1,y1=-1;for(let i=0;i<W*H;i++)if(near[i]){const x=i%W,y=(i/W)|0;if(x<x0)x0=x;if(x>x1)x1=x;if(y<y0)y0=y;if(y>y1)y1=y;}
+      return {near,far,MW:W,MH:H,nn,nf,rect:{x:x0/W,y:y0/H,w:(x1-x0+1)/W,h:(y1-y0+1)/H}};};
+    const mS=top?shape(dA,dS,Math.floor(sy0)-2,-1,-1):null,mB=bot?shape(dS,dA,Math.ceil(sy1)+2,1,H):null;
+    if(mS){box.S={...mS.rect,mask:mS};res.top.shape={px:mS.nn,far_px:mS.nf};}
+    if(mB){box.B={...mB.rect,mask:mB};res.bottom.shape={px:mB.nn,far_px:mB.nf};}
+    regCache={};
     res.ok=!msgs.length;data.place=res;
     showPlace(res.ok,res.ok?t('plOk'):msgs.join(' '));
     return res.ok?t('plOk'):'✗ '+msgs.join(' ');
@@ -339,7 +361,22 @@ function rel(e){const r=ov.getBoundingClientRect();return [(e.clientX-r.left)/r.
 ov.addEventListener('pointerdown',e=>{if(running)return;const [x,y]=rel(e);let best=null,bd=9;for(const k in box){const b=box[k],d=Math.hypot(x-(b.x+b.w/2),y-(b.y+b.h/2));if(d<bd){bd=d;best=k;}}drag=best;ov.setPointerCapture(e.pointerId);move(e);});
 ov.addEventListener('pointermove',e=>{if(drag)move(e);});
 ov.addEventListener('pointerup',()=>{drag=null;});
-function move(e){const [x,y]=rel(e),b=box[drag];b.x=Math.max(0,Math.min(1-b.w,x-b.w/2));b.y=Math.max(0,Math.min(1-b.h,y-b.h/2));}
+function move(e){const [x,y]=rel(e),b=box[drag];if(b.mask){delete b.mask;b.h=Math.max(b.h,0.05);b.w=Math.max(b.w,0.15);}b.x=Math.max(0,Math.min(1-b.w,x-b.w/2));b.y=Math.max(0,Math.min(1-b.h,y-b.h/2));}
+// v0.17: a band = its mask (shaped) or its rectangle, as a list of pixel indexes at the given resolution (cached)
+let regCache={};
+function regIdx(k,which,W,H){const b=box[k],key=k+which+W+'x'+H+(b.mask?'m':'r'+b.x.toFixed(3)+b.y.toFixed(3));if(regCache[key])return regCache[key];
+  const out=[];if(b.mask){const M=which==='far'?b.mask.far:b.mask.near,MW=b.mask.MW,MH=b.mask.MH;
+    for(let y=0;y<H;y++){const my=Math.min(MH-1,Math.floor(y*MH/H));for(let x=0;x<W;x++)if(M[my*MW+Math.min(MW-1,Math.floor(x*MW/W))])out.push(y*W+x);}}
+  else{const r=which==='far'?far(k):b,x0=Math.round(r.x*W),y0=Math.round(r.y*H),w=Math.max(1,Math.round(r.w*W)),h=Math.max(1,Math.round(r.h*H));
+    for(let y=y0;y<Math.min(H,y0+h);y++)for(let x=x0;x<Math.min(W,x0+w);x++)out.push(y*W+x);}
+  for(const kk in regCache)if(kk.startsWith(k+which))delete regCache[kk];regCache[key]=out;return out;}
+function meanIdx(d,idx){let r=0,g=0,bl=0,n=0,cl=0;for(const p of idx){const i=p*4;if(d[i]>=250||d[i+1]>=250||d[i+2]>=250){cl++;continue;}r+=lin(d[i]);g+=lin(d[i+1]);bl+=lin(d[i+2]);n++;}
+  return n?{m:[r/n,g/n,bl/n],clip:cl/(n+cl)}:{m:null,clip:1};}
+function bandIdx(d,W,idx){const all=meanIdx(d,idx);if(!all.m)return all;
+  const ch=m=>{const s=m[0]+m[1]+m[2]||1;return [m[0]/s,m[1]/s];},c0=ch(all.m);let u=0,x0=W,x1=0;for(const p of idx){const x=p%W;if(x<x0)x0=x;if(x>x1)x1=x;}
+  const g=[[],[],[],[],[]];for(const p of idx)g[Math.min(4,Math.floor(5*(p%W-x0)/Math.max(1,x1-x0+1)))].push(p);
+  for(const q of g){if(!q.length)continue;const m=meanIdx(d,q);if(m.m){const c=ch(m.m);u=Math.max(u,100*Math.hypot(c[0]-c0[0],c[1]-c0[1]));}}
+  all.u=u;return all;}
 function meanBox(d,W,H,b){const x0=Math.round(b.x*W),y0=Math.round(b.y*H),w=Math.max(1,Math.round(b.w*W)),h=Math.max(1,Math.round(b.h*H));
   let r=0,g=0,bl=0,n=0,cl=0;for(let y=y0;y<y0+h;y++)for(let x=x0;x<x0+w;x++){const i=(y*W+x)*4;if(d[i]>=250||d[i+1]>=250||d[i+2]>=250){cl++;continue;}r+=lin(d[i]);g+=lin(d[i+1]);bl+=lin(d[i+2]);n++;}
   return n?{m:[r/n,g/n,bl/n],clip:cl/(n+cl)}:{m:null,clip:1};}
@@ -353,12 +390,14 @@ const MOTION_LIMIT=6;let collect=null;
 function loop(){
   const v=$('vid');if(!track||track.readyState!=='live')return;
   const W=320,H=Math.round(320*v.videoHeight/Math.max(1,v.videoWidth)),cv=$('cv');cv.width=W;cv.height=H;const x=cv.getContext('2d',{willReadFrequently:true});x.drawImage(v,0,0,W,H);
-  const d=x.getImageData(0,0,W,H).data;live.S=band(d,W,H,box.S);live.B=band(d,W,H,box.B);live.S2=meanBox(d,W,H,far('S'));live.B2=meanBox(d,W,H,far('B'));
+  const d=x.getImageData(0,0,W,H).data;live.S=bandIdx(d,W,regIdx('S','near',W,H));live.B=bandIdx(d,W,regIdx('B','near',W,H));live.S2=meanIdx(d,regIdx('S','far',W,H));live.B2=meanIdx(d,regIdx('B','far',W,H));
   if(collect)collect.push({t:performance.now(),S:live.S,B:live.B,S2:live.S2,B2:live.B2});
   ov.width=ov.clientWidth;ov.height=ov.clientHeight;const o=ov.getContext('2d');o.clearRect(0,0,ov.width,ov.height);o.lineWidth=3;o.font='bold 15px system-ui';
   if(placeRect){o.strokeStyle='rgba(255,255,255,.8)';o.setLineDash([4,4]);o.lineWidth=2;o.strokeRect(placeRect.x*ov.width,placeRect.y*ov.height,placeRect.w*ov.width,placeRect.h*ov.height);}
-  for(const k in box){const b=box[k],f=far(k);o.strokeStyle=k==='S'?'#70d8cc':'#e0b040';o.setLineDash([8,5]);o.lineWidth=3;o.strokeRect(b.x*ov.width,b.y*ov.height,b.w*ov.width,b.h*ov.height);
-    o.setLineDash([2,6]);o.lineWidth=1.5;o.strokeRect(f.x*ov.width,f.y*ov.height,f.w*ov.width,f.h*ov.height);o.fillStyle=o.strokeStyle;o.fillText(k==='S'?'TV':'B',b.x*ov.width+5,b.y*ov.height+17);
+  for(const k in box){const b=box[k],f=far(k);o.strokeStyle=k==='S'?'#70d8cc':'#e0b040';
+    if(b.mask){o.imageSmoothingEnabled=false;o.drawImage(maskImg(k),0,0,ov.width,ov.height);}
+    else{o.setLineDash([8,5]);o.lineWidth=3;o.strokeRect(b.x*ov.width,b.y*ov.height,b.w*ov.width,b.h*ov.height);
+    o.setLineDash([2,6]);o.lineWidth=1.5;o.strokeRect(f.x*ov.width,f.y*ov.height,f.w*ov.width,f.h*ov.height);}o.fillStyle=o.strokeStyle;o.fillText(k==='S'?'TV':'B',b.x*ov.width+5,b.y*ov.height+17);
     // v0.16: what the camera sees in the band, as a circle (the hue at full brightness: the glow itself is too dim to show)
     const lv=live[k];if(lv&&lv.m){const R=9,cx=b.x*ov.width+5+o.measureText(k==='S'?'TV':'B').width+6+R,cy=b.y*ov.height+12;
       o.setLineDash([]);o.beginPath();o.arc(cx,cy,R,0,2*Math.PI);o.fillStyle=hueCss(lv.m);o.fill();o.lineWidth=2;o.strokeStyle='rgba(255,255,255,.9)';o.stroke();
@@ -368,7 +407,12 @@ function loop(){
   const un=s=>s&&s.u!==undefined?' ·≠'+s.u.toFixed(1):'';
   $('mmVals').textContent='TV '+f(live.S)+un(live.S)+'   B '+f(live.B)+un(live.B);
   setTimeout(loop,200);}
-function hueCss(m){const mx=Math.max(...m);if(!(mx>1e-4))return '#000';
+const maskCv={};
+function maskImg(k){const M=box[k].mask;if(maskCv[k]&&maskCv[k].M===M)return maskCv[k].c;
+  const c=document.createElement('canvas');c.width=M.MW;c.height=M.MH;const x=c.getContext('2d'),im=x.createImageData(M.MW,M.MH),col=k==='S'?[112,216,204]:[224,176,64];
+  for(let i=0;i<M.MW*M.MH;i++){const a=M.near[i]?150:M.far[i]?55:0;if(a){im.data[4*i]=col[0];im.data[4*i+1]=col[1];im.data[4*i+2]=col[2];im.data[4*i+3]=a;}}
+  x.putImageData(im,0,0);maskCv[k]={M,c};return c;}
+function hueCss(m){const mx=Math.max(...m);if(!(mx>0.003))return '#222';  // too dark to tell a colour
   const e=v=>{v=Math.max(0,v/mx);return Math.round(255*(v<=0.0031308?12.92*v:1.055*Math.pow(v,1/2.4)-0.055));};return 'rgb('+e(m[0])+','+e(m[1])+','+e(m[2])+')';}
 function avg(rows,key){const xs=rows.map(r=>r[key]).filter(s=>s&&s.m);if(!xs.length)return null;
   return {m:[0,1,2].map(i=>+(xs.reduce((a,s)=>a+s.m[i],0)/xs.length).toFixed(5)),clip:+(xs.reduce((a,s)=>a+s.clip,0)/xs.length).toFixed(3),n:xs.length,
@@ -457,7 +501,7 @@ async function putBack(){mm(undefined,t('restore'));await restoreStrip();await e
 async function run(){
   running=true;abort=false;setGo('stop');$('dl').disabled=$('cp').disabled=true;$('sum').innerHTML='';$('runRes').textContent='';
   const full=$('mode').value==='full';COLS=full?COLS_FULL:COLS_QUICK;VID=full?VID_FULL:VID_QUICK;data.mode=full?'full':'quick';
-  data.A=[];data.B=[];data.C=[];data.notes=[];data.boxes=JSON.parse(JSON.stringify(box));
+  data.A=[];data.B=[];data.C=[];data.notes=[];data.boxes=Object.fromEntries(Object.entries(box).map(([k,v])=>[k,{x:+v.x.toFixed(3),y:+v.y.toFixed(3),w:+v.w.toFixed(3),h:+v.h.toFixed(3),shaped:!!v.mask,px:v.mask?v.mask.nn:undefined}]));
   beep(660,60);  // also unlocks the audio on this tap
   try{const pr=castVideo(VID.file);preCast={promise:pr,t0:performance.now()};pr.then(()=>{if(preCast)preCast.t0=performance.now();}).catch(()=>{preCast=null;});}catch(e){preCast=null;}
   for(let n=COUNTDOWN;n>0&&!abort;n--){$('mmCount').textContent=n;$('mmCount').style.display='block';mm('',t('cd').replace('%s',n),0);if(n<=3)beep(660,110);await wait(1000);}
@@ -565,12 +609,12 @@ async function setTry(on){const out=$('tryRes');
   try{await unlock();
     if(on){await ambiPost('/settings/strip',{preview:true,cm_on:true,cm:trimmed()});tryOn=true;}
     else{await ambiPost('/settings/strip',{...saved});tryOn=false;}
-    $('tryOn').disabled=tryOn;$('tryOff').disabled=!tryOn;out.className='res '+(tryOn?'warn':'ok');out.textContent=tryOn?t('tryIsOn'):t('tryIsOff');
+    $('tryOn').disabled=tryOn;$('tryOff').disabled=!tryOn;out.className='res mut';out.textContent='';tryState();
   }catch(e){out.className='res bad';out.textContent='✗ '+e;}}
 $('tryOn').onclick=()=>setTry(true);$('tryOff').onclick=()=>setTry(false);
 ['trX','trY','trB'].forEach(id=>$(id).addEventListener('input',trimMoved));$('trZero').onclick=trimZero;
 document.querySelectorAll('[data-nudge]').forEach(b=>{const [id,d]=b.dataset.nudge.split(',');b.onclick=()=>trimNudge(id,+d);});
-$('tryFade').onclick=()=>{if(sess())castVideo('fades.mp4').catch(()=>{});};
+$('tryFade').onclick=()=>tryCast('fades');
 // v0.14 (user: «θέλω 3 σλοτ»): the ESP's three memory slots (firmware v0.53+ keeps the colour matrix in them);
 // the page stores the correction as it is on the strip now (fit + white sliders); loading is on the ESP page
 let slotsNow=null;
@@ -590,9 +634,18 @@ async function slotSave(x){if(!tryFit||!savedFull)return;
     $('slotRes').className='res ok';$('slotRes').textContent=t('slotOk').replace('%n',x.n);}
   catch(e){$('slotRes').className='res bad';$('slotRes').textContent='✗ '+e;}}
 const tryHome=$('tryBox').parentNode,tryNext=$('tryBox').nextElementSibling;
-function tryTexts(){if(!tryFit)return;const b=!!tryFit.base;$('tryPtxt').textContent=t(b?'tryP0':'tryP');$('trimPtxt').textContent=t(b?'trimP0':'trimP');$('tryOn').textContent=t(b?'tryOn0':'tryOn');$('trZero').textContent=t(b?'trZero0':'trZero');
+// v0.17 (user: «δεν καταλαβαίνω αν πάτησα ή όχι»): a status line right under the buttons - preview on / off, what is
+// on the TV - and the colour button that is on the TV outlined
+let tvNow=null,tvErr=false;
+function tryState(){const e=$('tryState');if(!e)return;e.className=tryOn?'on':'off';
+  e.textContent=(tryOn?t('stOn'):t('stOff'))+(tvErr?'\n'+t('stNoCast'):tvNow?'\n'+t('stTv')+(tvNow==='fades'?t('fadesName'):((T[L].cn||{})[tvNow]||tvNow))+t('stSent'):'');e.style.whiteSpace='pre-wrap';
+  if(tryFit)$('tryOn').textContent=tryOn?t('tryOnIs'):t(tryFit.base?'tryOn0':'tryOn');
+  document.querySelectorAll('#tryPats .btn,#tryFade').forEach(b=>b.classList.toggle('cur',b.dataset.c===tvNow));}
+async function tryCast(n){if(!sess()){tvErr=true;tvNow=null;tryState();return;}tvErr=false;
+  try{if(n==='fades')await castVideo('fades.mp4');else await castImage((n==='grey50'?'grey128':n)+'.png');tvNow=n;}catch(e){tvNow=null;$('tryRes').className='res bad';$('tryRes').textContent='✗ '+e;}tryState();}
+function tryTexts(){if(!tryFit)return;const b=!!tryFit.base;$('tryPtxt').textContent=t(b?'tryP0':'tryP');$('trimPtxt').textContent=t(b?'trimP0':'trimP');$('tryOn').textContent=t(b?'tryOn0':'tryOn');$('trZero').textContent=t(b?'trZero0':'trZero');document.querySelectorAll('#tryPats .btn').forEach(x=>{const sw=x.querySelector('.sw');x.textContent=(T[L].cn||{})[x.dataset.c]||x.dataset.c;if(sw)x.prepend(sw);});
   if(!tryOn){$('tryRes').className='res mut';$('tryRes').textContent=b?t('tryBase')+(tryFit.from==='cm'?t('tryBaseCm'):t('tryBaseWb')+savedFull.wb_r+' / '+savedFull.wb_g+' / '+savedFull.wb_b)
-    :t('tryPred')+' '+tryFit.pred.map(p=>p.name+' '+p.now+' → '+p.after).join(' · ');}}
+    :t('tryPred')+' '+tryFit.pred.map(p=>p.name+' '+p.now+' → '+p.after).join(' · ');}tryState();}
 function showTry(mode){const box=$('tryBox');
   if(mode==='now'){tryFit=baseFit();trim={x:0,y:0,b:1};$('eyeSlot').appendChild(box);$('eyeCard').style.display=tryFit?'block':'none';}
   else{tryFit=fitCm();try{const st=JSON.parse(localStorage.getItem('ambiTrim')||'null');if(st&&isFinite(st.x)&&isFinite(st.y))trim={x:+st.x,y:+st.y,b:isFinite(st.b)?+st.b:1};}catch(e){}
@@ -600,8 +653,8 @@ function showTry(mode){const box=$('tryBox');
     else if(savedFull)return showTry('now');}  // no fit from this run: the sliders stay on what plays now
   data.try_fit=tryFit;if(!tryFit){box.style.display='none';return;}box.style.display='block';trimInit();slotsLoad();
   const tp=$('tryPats');tp.innerHTML='';COLS.forEach(([n,c])=>{const b=document.createElement('button');b.className='btn';b.style.padding='8px 10px';
-    b.innerHTML='<span class="sw" style="background:'+c+'"></span>'+n;b.onclick=()=>{if(sess())castImage((n==='grey50'?'grey128':n)+'.png').catch(()=>{});else{$('tryRes').className='res warn';$('tryRes').textContent=t('need');}};tp.appendChild(b);});
-  tryTexts();}
+    b.dataset.c=n;b.innerHTML='<span class="sw" style="background:'+c+'"></span>'+((T[L].cn||{})[n]||n);b.onclick=()=>tryCast(n);tp.appendChild(b);});
+  $('tryFade').dataset.c='fades';tryTexts();}
 function summary(){
   const nRe=['A','B','C'].reduce((a,k)=>a+data[k].filter(r=>r.tries).length,0),nBad=['B','C'].reduce((a,k)=>a+data[k].filter(r=>r.unsteady).length,0);
   const cc=camCurve();data.cam=cc?{curve:cc.curve}:null;
