@@ -135,7 +135,7 @@ ol{margin:6px 0 0;padding-left:20px;color:var(--muted);font-size:14px}
 </div>
 <canvas id="cv" style="display:none"></canvas>
 <script>
-const PAGE_VERSION='0.20';
+const PAGE_VERSION='0.21';
 const T={
  en:{remCast:'On the TV: ',remNoCast:'no Cast session on the phone',lightOk:'room dark ✓',lightSome:'some light in the room',lightMuch:'TOO MUCH LIGHT in the room: the colours will not be right (best at night, lights off)',lightW:'room light',remKept:'Kept in slot %n',remTryOn:'correction on the strip (preview)',remTryOff:'back to your settings',remNoFit:'no correction from a measurement yet',trSatLo:'Less saturated',trSatHi:'More saturated',trSat:'saturation',tryKeep:'✓ Keep these values',tryReset:'Back to the calibration',keptOk:'✓ Kept on the ESP: the strip plays them now (and the ESP page shows the same).',resetOk:'✓ Back to slot %n, exactly as it was saved.',noRef:'No memory slot has been loaded on the ESP yet.',colNow:'In force on the ESP: slot %n «%s»',colMod:' · changed (sliders / brightness)',colSame:' · exactly as saved',colNone:'In force on the ESP: the strip settings (no memory slot loaded).',remOnMsg:'Remote control from the ESP: waiting for a command from the ESP page (Bridge & settings → Strip colour). Keep this screen on, the page in front.',remOffMsg:'Remote control off.',remOld:'The ESP firmware is older than v0.55: no remote control.',remNeed:'First connect (1).',trimP055:'Cast white first: the strip follows at once; − / + are small steps. The same four settings as on the ESP page (Strip colour), on top of what is in force; brightness = the strip brightness. «As now» = what plays now.',title:'colour measurement',intro:'Measurement only: it finds out how your strip and your TV really look on your wall, so the colour correction can be computed. Nothing is changed for good; at the end everything is as before. About 3 minutes.',
   i1:'Colours on the TV, the strip as it is now.',i2:'The same colours, the strip dark for a while (a preview, not saved).',i3:'The TV turns BLACK on purpose for about 50 s and the strip shows its own red, green, blue at 4 levels (this also teaches the page how your camera sees light).',mQuick:'Quick: 5 colours (about 2 min)',mFull:'Full: 11 colours (about 3.5 min)',
@@ -309,12 +309,14 @@ async function remSet(on){
 // v0.20: a small picture of what the camera sees, with the bands, for the ESP page (JPEG, ~5 KB; the ESP keeps one in RAM)
 let remCamTm=null,remCamBusy=false;
 async function remCam(){if(!remOn||remCamBusy||document.hidden||!track||track.readyState!=='live')return;remCamBusy=true;
-  try{const v=$('vid'),W=200,H=Math.round(W*v.videoHeight/Math.max(1,v.videoWidth));if(!H)return;
+  // v0.21: 280 px (was 200); quality steps down until it fits; a 5 s timeout so a lost reply cannot block the next ones
+  try{const v=$('vid'),W=280,H=Math.round(W*v.videoHeight/Math.max(1,v.videoWidth));if(!H)return;
     const c=document.createElement('canvas');c.width=W;c.height=H;const x=c.getContext('2d');x.drawImage(v,0,0,W,H);
     const ov=$('ov');if(ov.width&&ov.height)x.drawImage(ov,0,0,W,H);
-    let q=0.6,b=null;for(let i=0;i<3;i++){b=await new Promise(r=>c.toBlob(r,'image/jpeg',q));if(b&&b.size<=9500)break;q-=0.2;}
+    let q=0.6,b=null;for(let i=0;i<4;i++){b=await new Promise(r=>c.toBlob(r,'image/jpeg',q));if(b&&b.size<=9500)break;q-=0.15;}
     if(!b||b.size>9500)return;
-    await fetch(ESP+'/ambi/api/companion/cam',{method:'POST',headers:{'Content-Type':'text/plain'},body:b,targetAddressSpace:'local'});}
+    const ac=new AbortController(),tm=setTimeout(()=>ac.abort(),5000);
+    try{await fetch(ESP+'/ambi/api/companion/cam',{method:'POST',headers:{'Content-Type':'text/plain'},body:b,targetAddressSpace:'local',signal:ac.signal});}finally{clearTimeout(tm);}}
   catch(e){}finally{remCamBusy=false;}}
 $('mmRem').onclick=()=>remSet(!remOn);
 // v0.19: the screen went off / another app or tab: say so at once (timers stop in a hidden tab), and again when back
